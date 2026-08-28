@@ -16,6 +16,8 @@
 #include "qdltpluginmanager.h"
 
 #define DLT_FILE_INDEXER_SEG_SIZE (1024*1024)
+// Chunk size used when reading/writing the index cache file in bulk.
+#define DLT_FILE_INDEXER_IO_CHUNK (4*1024*1024)
 #define DLT_FILE_INDEXER_FILE_VERSION 2
 
 class DltFileIndexerKey

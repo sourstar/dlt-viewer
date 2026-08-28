@@ -121,6 +121,15 @@ bool DltFileIndexer::index(int num)
     // clear old index
     indexAllList.clear();
 
+    // Pre-size the index. A DLT message with a storage header is never much
+    // smaller than 64 bytes, so file size / 64 is a safe upper bound on the
+    // message count and removes the repeated reallocation of a vector that
+    // grows to millions of entries.
+    if(f.size() > 0)
+    {
+        indexAllList.reserve(static_cast<qsizetype>(f.size() / 64) + 1);
+    }
+
     // check if file is empty
     if(f.size() <= 0)
     {
@@ -143,7 +152,6 @@ bool DltFileIndexer::index(int num)
     qint64 length = 0;
     qint64 msgindex = 0;
     qint64 pos = 0;
-    qint64 abspos = 0;
     qint64 current_message_pos = 0;
     qint64 next_message_pos = 0;
     qint64 counter_header = 0;
@@ -184,7 +192,6 @@ bool DltFileIndexer::index(int num)
 
         for(number=0;number < length;number++)
         {
-            abspos= pos+number;
             // search length of DLT message
             if(counter_header>0)
             {
@@ -319,29 +326,31 @@ bool DltFileIndexer::index(int num)
                 lastFound = 0; // no hit, so just go on with search for the startsequence
                 //qDebug() << "DLT recived but not the stop sign 0x01" << msgindex;
             }
-
-
-            /* stop if requested */
-            if(true == stopFlag)
-            {
-                qDebug().noquote() << "Request stoping indexing received" << __LINE__ << __FILE__;
-                emit(progress((abspos)));
-                f.close();
-                return false;
-            }
-
-            if(fileSize)
-                percent = (f.pos()*100)/fileSize;
-
-            if(percent>=progressCounter)
-            {
-                progressCounter += 1;
-                emit(progress(percent));
-                if((percent>0) && ((percent%10)==0))
-                    qDebug() << "CI:" << percent << "%";
-            }
-
         } // end of for loop to read within one segment accross "number"
+
+        // Progress and cancellation are handled once per ~1 MB segment rather
+        // than once per byte examined. The old placement inside the inner loop
+        // cost a QFile::pos() virtual call plus a 64-bit division for every
+        // iteration, which is roughly a dozen times per DLT message.
+        /* stop if requested */
+        if(true == stopFlag)
+        {
+            qDebug().noquote() << "Request stoping indexing received" << __LINE__ << __FILE__;
+            emit(progress(pos));
+            f.close();
+            return false;
+        }
+
+        if(fileSize)
+            percent = ((pos + length) * 100) / fileSize;
+
+        if(percent>=progressCounter)
+        {
+            progressCounter = percent + 1;
+            emit(progress(percent));
+            if((percent>0) && ((percent%10)==0))
+                qDebug() << "CI:" << percent << "%";
+        }
     }
     while(length>0); // overall "do loop"
     qDebug() << "Create index: Finish";
@@ -1068,7 +1077,6 @@ QString DltFileIndexer::filenameFilterIndexCache(QDltFilterList &filterList,QStr
 bool DltFileIndexer::saveIndex(QString filename, const QVector<qint64> &index)
 {
     quint32 version = DLT_FILE_INDEXER_FILE_VERSION;
-    qint64 value;
 
     QFile file(filename);
 
@@ -1080,13 +1088,27 @@ bool DltFileIndexer::saveIndex(QString filename, const QVector<qint64> &index)
     }
 
     // write version
-    file.write((char*)&version,sizeof(version));
-
-    // write complete index
-    for(int num=0;num<index.size();num++)
+    if(file.write((char*)&version,sizeof(version)) != sizeof(version))
     {
-        value = index[num];
-        file.write((char*)&value,sizeof(value));
+        qWarning() << "DltFileIndexer: Failed to write index cache header to" << filename << ":" << file.errorString();
+        return false;
+    }
+
+    // Write the index in bulk. Writing one qint64 per QFile::write() call costs
+    // one write per message, which dominates the save for large files.
+    const char *data = reinterpret_cast<const char*>(index.constData());
+    const qint64 total = static_cast<qint64>(index.size()) * static_cast<qint64>(sizeof(qint64));
+    qint64 written = 0;
+    while(written < total)
+    {
+        const qint64 chunk = qMin<qint64>(DLT_FILE_INDEXER_IO_CHUNK, total - written);
+        const qint64 result = file.write(data + written, chunk);
+        if(result <= 0)
+        {
+            qWarning() << "DltFileIndexer: Failed to write index cache to" << filename << ":" << file.errorString();
+            return false;
+        }
+        written += result;
     }
 
     // close cache file
@@ -1098,9 +1120,7 @@ bool DltFileIndexer::saveIndex(QString filename, const QVector<qint64> &index)
 bool DltFileIndexer::loadIndex(QString filename, QVector<qint64> &index)
 {
     quint32 version;
-    qint64 value;
     int length;
-    qint64 indexcount=0;
 
     QFile file(filename);
     index.clear();
@@ -1113,9 +1133,17 @@ bool DltFileIndexer::loadIndex(QString filename, QVector<qint64> &index)
     }
 
     qDebug() << "### Load index file";
-    qDebug() << "Load index file " << filename;// << __FILE__ << "LINE" << __LINE__;
+    qDebug() << "Load index file " << filename;
 
-    index.reserve(static_cast<int>((file.size() - sizeof(version)) / sizeof(value))); // prevent memory issues through reallocation
+    const qint64 fileSize = file.size();
+    const qint64 payloadSize = fileSize - static_cast<qint64>(sizeof(version));
+    if(payloadSize < 0 || (payloadSize % static_cast<qint64>(sizeof(qint64))) != 0)
+    {
+        qDebug() << "Loading index file " << filename << "failed: unexpected size" << fileSize;
+        file.close();
+        return false;
+    }
+    index.reserve(static_cast<qsizetype>(payloadSize / static_cast<qint64>(sizeof(qint64)))); // prevent memory issues through reallocation
 
     // read version
     length = file.read((char*)&version,sizeof(version));
@@ -1129,58 +1157,71 @@ bool DltFileIndexer::loadIndex(QString filename, QVector<qint64> &index)
         return false;
     }
 
-    int modvalue = file.size() / 100;
-    if (modvalue == 0) // avoid divison by zero
+    if(false == QDltOptManager::getInstance()->issilentMode())
     {
-         modvalue = 1;
+        emit(progressText(QString("LI %1/%2").arg(currentRun).arg(maxRun)));
+        emit(progressMax(100));
     }
-
-   // read complete index
-   if (false == QDltOptManager::getInstance()->issilentMode() )
-     {
-       emit(progressText(QString("LI %1/%2").arg(currentRun).arg(maxRun)));
-       emit(progressMax(100)); // should be 100
-     }
-   else
-     {
-      qDebug().noquote() << "Load index: Start";
-     }
-
-    unsigned int progressCounter = 1;
-    unsigned int percent = 0;
-    unsigned long fileSize = file.size();
-    emit(progress(0));
-    do
-    {
-        length = file.read((char*)&value,sizeof(value));
-        if(length==sizeof(value))
-        {
-            index.append(value);
-        }
-
-        if(fileSize)
-            percent = (file.pos()*100)/fileSize;
-
-        if(percent>=progressCounter)
-        {
-            progressCounter += 1;
-            emit(progress(percent));
-            if((percent>0) && ((percent%10)==0))
-              qDebug() << "LI:" << percent << "%";
-        }
-        indexcount++;
-    }
-    while(length==sizeof(value));
-
-    // now that it is doen we have to set the 100 %
-    if (false == QDltOptManager::getInstance()->issilentMode() )
-      {
-        emit(progress(fileSize));
-      }
     else
-      {
-       qDebug().noquote() << "Load index: Finish";
-      }
+    {
+        qDebug().noquote() << "Load index: Start";
+    }
+
+    // Read the index in bulk. Reading one qint64 per QFile::read() call -- and
+    // asking QFile::pos() for the progress bar on every one of them -- costs
+    // two calls per message, which dominates the load for large files.
+    unsigned int progressCounter = 1;
+    emit(progress(0));
+
+    QByteArray buffer;
+    qint64 consumed = 0;
+    while(consumed < payloadSize)
+    {
+        const qint64 want = qMin<qint64>(DLT_FILE_INDEXER_IO_CHUNK, payloadSize - consumed);
+        buffer = file.read(want);
+        if(buffer.size() != want)
+        {
+            qDebug() << "Loading index file " << filename << "failed: short read at" << consumed;
+            file.close();
+            return false;
+        }
+
+        const qint64 *values = reinterpret_cast<const qint64*>(buffer.constData());
+        const qsizetype count = buffer.size() / static_cast<qsizetype>(sizeof(qint64));
+        for(qsizetype num = 0; num < count; num++)
+        {
+            index.append(values[num]);
+        }
+        consumed += want;
+
+        /* stop if requested */
+        if(true == stopFlag)
+        {
+            qDebug().noquote() << "Request stopping index cache load received" << __LINE__ << __FILE__;
+            file.close();
+            return false;
+        }
+
+        const unsigned int percent = (fileSize > 0) ? static_cast<unsigned int>((consumed * 100) / fileSize) : 100;
+        if(percent >= progressCounter)
+        {
+            progressCounter = percent + 1;
+            emit(progress(percent));
+            if((percent > 0) && ((percent % 10) == 0))
+                qDebug() << "LI:" << percent << "%";
+        }
+    }
+
+    // now that it is done we have to set the 100 %
+    if(false == QDltOptManager::getInstance()->issilentMode())
+    {
+        emit(progress(100));
+    }
+    else
+    {
+        qDebug().noquote() << "Load index: Finish";
+    }
+
     // close cache file
     file.close();
 
