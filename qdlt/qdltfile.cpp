@@ -720,55 +720,60 @@ QByteArray QDltFile::getMsg(int index) const
         return QByteArray();
     }
 
-    /* Serve from the read-ahead buffer when the message is fully inside it.
-       Every full-file pass is sequential, so after one block read the next few
-       thousand messages need no I/O at all. */
-    if(file->readBufferPos >= 0 &&
-       positionForIndex >= file->readBufferPos &&
-       (positionForIndex + msgLength) <= (file->readBufferPos + file->readBuffer.size()))
+    /* Sequential read-ahead.
+     *
+     * Every full-file pass -- filter indexing, export, search, marker counting
+     * -- walks the messages in order, so one block read serves thousands of
+     * them. The window is per thread: parallel Find-All runs several threads
+     * over disjoint regions, and a single shared window would just be evicted
+     * back and forth. It is keyed by file and by a generation counter, so a
+     * rebuilt index or a grown file invalidates it without needing to reach
+     * into other threads. */
+    struct ReadAhead
     {
-        return file->readBuffer.mid(static_cast<qsizetype>(positionForIndex - file->readBufferPos),
-                                    static_cast<qsizetype>(msgLength));
+        const QDltFileItem *owner = nullptr;
+        quint64 generation = 0;
+        qint64 pos = -1;
+        QByteArray data;
+    };
+    static thread_local ReadAhead ra;
+
+    const bool windowValid = (ra.owner == file) && (ra.generation == file->generation) && (ra.pos >= 0);
+    if(windowValid &&
+       positionForIndex >= ra.pos &&
+       (positionForIndex + msgLength) <= (ra.pos + ra.data.size()))
+    {
+        return ra.data.mid(static_cast<qsizetype>(positionForIndex - ra.pos),
+                           static_cast<qsizetype>(msgLength));
     }
 
     if( false == file->infile.seek(positionForIndex) )
     {
         qDebug() << "Seek error on " << positionForIndex << file->infile.fileName() << __FILE__ << __LINE__;
-        file->invalidateReadBuffer();
         return QByteArray();
     }
 
-    /* Only take over the buffer for an access that continues forward from it
-       (or when it is empty). Parallel Find-All runs several threads over
-       disjoint regions of the same file; without this test each thread would
-       evict the others' block and every message would cost a 4 MiB read. With
-       it, one scan keeps the buffer and the others fall back to the direct
-       read they did before, so the worst case is the old behaviour. */
-    const bool continuesBuffer =
-        (file->readBufferPos >= 0) &&
-        (positionForIndex >= file->readBufferPos) &&
-        (positionForIndex <= file->readBufferPos + file->readBuffer.size());
-
-    if(msgLength >= DLT_FILE_READ_AHEAD_SIZE ||
-       (file->readBufferPos >= 0 && !continuesBuffer))
+    if(msgLength >= DLT_FILE_READ_AHEAD_SIZE)
     {
-        /* Message larger than the buffer, or an access somewhere else in the
-           file: read it straight through and leave the buffer alone. */
-        buf = file->infile.read(msgLength);
+        /* larger than the window: read it straight through */
+        return file->infile.read(msgLength);
+    }
+
+    ra.data = file->infile.read(DLT_FILE_READ_AHEAD_SIZE);
+    if(ra.data.size() < msgLength)
+    {
+        /* short read: hand back what the file actually has */
+        buf = ra.data;
+        ra.owner = nullptr;
+        ra.pos = -1;
+        ra.data.clear();
         return buf;
     }
 
-    file->readBuffer = file->infile.read(DLT_FILE_READ_AHEAD_SIZE);
-    if(file->readBuffer.size() < msgLength)
-    {
-        /* short read: hand back what the file actually has, no buffering */
-        buf = file->readBuffer;
-        file->invalidateReadBuffer();
-        return buf;
-    }
-
-    file->readBufferPos = positionForIndex;
-    return file->readBuffer.mid(0, static_cast<qsizetype>(msgLength));
+    ra.owner = file;
+    ra.generation = file->generation;
+    ra.pos = positionForIndex;
+    return ra.data.mid(0, static_cast<qsizetype>(msgLength));
 }
 
 bool QDltFile::getMsg(int index,QDltMsg &msg)

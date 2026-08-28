@@ -72,6 +72,17 @@ int main(int argc, char **argv)
         }
         report("  read + parse every message", t.elapsed(), parsed);
 
+        /* Pass 2b: fetch every message but do not parse it. The gap between
+           this and pass 2 is what fusing the filter into the index scan could
+           remove: fusing avoids re-fetching each message, but still has to
+           parse and match it. */
+        t.start();
+        qint64 bytes = 0;
+        for (int i = 0; i < messages; i++)
+            bytes += file.getMsg(i).size();
+        report("  fetch only (no parse)", t.elapsed(), messages);
+        if (bytes == 0) out << "(no bytes)" << Qt::endl;
+
         /* Pass 3: the same walk with a payload filter applied, which is what
            applying a filter in the UI actually costs. */
         QDltFilter *filter = new QDltFilter();

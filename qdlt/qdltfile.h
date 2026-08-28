@@ -52,17 +52,11 @@ public:
     */
     QVector<qint64> indexAll;
 
-    //! Read-ahead buffer for sequential access.
-    /*!
-      Filter indexing, export, search and marker counting all walk the file
-      message by message. Without this, each message costs one seek plus one
-      read of ~100 bytes; with it a block serves thousands of messages.
-      readBufferPos is the file offset of readBuffer[0], or -1 when empty.
-    */
-    QByteArray readBuffer;
-    qint64 readBufferPos = -1;
+    //! Bumped whenever indexAll or the file behind it changes, so a
+    //! per-thread read-ahead window knows its contents are stale.
+    quint64 generation = 0;
 
-    void invalidateReadBuffer() { readBuffer.clear(); readBufferPos = -1; }
+    void invalidateReadBuffer() { generation++; }
 
 };
 
