@@ -10,6 +10,7 @@
 #include <QMutexLocker>
 #include <QDir>
 #include <QFileInfo>
+#include <QSet>
 #include <vector>
 #include <limits>
 #include <atomic>
@@ -433,6 +434,29 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
             start=end;
     }
 
+    /* In-memory result of the last filter pass.
+     *
+     * Switching filters off and back on is a normal way to look at the context
+     * around a hit, and it recomputed the whole pass every time unless the
+     * on-disk index cache happened to be enabled. The key is the same one the
+     * disk cache uses, so it already covers the filter set, the files and their
+     * size, the active decoder plugins, the sort mode and the filter range.
+     *
+     * Only used for modeFilter: a fresh load still has to walk the file to
+     * collect the control-message side effects. */
+    if(mode == modeFilter && memoFilterValid && !memoFilterKey.isEmpty())
+    {
+        const QString key = filenameFilterIndexCache(filterList, filenames);
+        if(key == memoFilterKey)
+        {
+            indexFilterList = memoFilterIndex;
+            qDebug() << "Reused the previous filter index:" << indexFilterList.size() << "messages";
+            computeMarkerCountsFromIndex(filterList, &indexFilterList);
+            emit(progress(100));
+            return true;
+        }
+    }
+
     // load filter index, if enabled and not an initial loading of file
     if(filterCacheEnabled && mode != modeIndexAndFilter && loadFilterIndexCache(filterList,indexFilterList,filenames))
     {
@@ -706,6 +730,11 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         qDebug() << "Saved filter index cache for files" << filenames;
     }
 
+    /* remember this result so toggling filters off and on again is free */
+    memoFilterKey = filenameFilterIndexCache(filterList, filenames);
+    memoFilterIndex = indexFilterList;
+    memoFilterValid = true;
+
     qDebug() << "Create filter index: Finish";
 
     return true;
@@ -968,6 +997,7 @@ void DltFileIndexer::run()
             }
            // qDebug() << "setDLTIndex" << num << __FILE__ << __LINE__;
             dltFile->setDltIndex(indexAllList,num);
+            invalidateFilterMemo();  // the message index changed underneath it
             currentRun++;
         }
         emit(finishIndex());
@@ -1100,11 +1130,13 @@ bool DltFileIndexer::saveIndexCache(QString filename)
     if (!dir.exists())
         dir.mkpath(".");
     qDebug() << "Saving index cache" << info.dir().path() + "/index/" +filenameCache;
-    if(!saveIndex(info.dir().path() + "/index/" +filenameCache,indexAllList))
+    const QString cachePath = info.dir().path() + "/index/" + filenameCache;
+    if(!saveIndex(cachePath,indexAllList))
     {
         // saving cache file failed
         return false;
     }
+    sessionCacheFiles.append(cachePath);
 
     return true;
 }
@@ -1180,12 +1212,14 @@ bool DltFileIndexer::saveFilterIndexCache(QDltFilterList &filterList, QVector<qi
     QDir dir(info.dir().path()+"/index");
     if (!dir.exists())
         dir.mkpath(".");
-    qDebug() << "Filter Index Cache filename" << info.dir().path() + "/index/" +filename;
-    if(!saveIndex(info.dir().path() + "/index/" +filename,index))
+    const QString filterCachePath = info.dir().path() + "/index/" + filename;
+    qDebug() << "Saving filter index cache" << filterCachePath;
+    if(!saveIndex(filterCachePath,index))
     {
         // saving of cache file failed
         return false;
     }
+    sessionCacheFiles.append(filterCachePath);
 
     return true;
 }
@@ -1417,4 +1451,35 @@ bool DltFileIndexer::loadIndex(QString filename, QVector<qint64> &index)
 qint64 DltFileIndexer::getfileerrors(void)
 {
     return errors_in_file;
+}
+
+void DltFileIndexer::removeSessionCacheFiles()
+{
+    if(sessionCacheFiles.isEmpty())
+        return;
+
+    QSet<QString> dirs;
+    int removed = 0;
+    for(const QString &path : sessionCacheFiles)
+    {
+        QFileInfo info(path);
+        dirs.insert(info.absolutePath());
+        if(QFile::remove(path))
+            removed++;
+    }
+    sessionCacheFiles.clear();
+
+    /* take the index directory with it when nothing else is left in it, so the
+       viewer does not leave an empty folder next to the user's logs */
+    for(const QString &dirPath : dirs)
+    {
+        QDir dir(dirPath);
+        if(dir.exists() && dir.dirName() == QStringLiteral("index") &&
+           dir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
+        {
+            dir.rmdir(dir.absolutePath());
+        }
+    }
+
+    qDebug() << "Removed" << removed << "index cache files written this session";
 }

@@ -1257,6 +1257,11 @@ void MainWindow::closeEvent(QCloseEvent *event)
     {
         QMainWindow::closeEvent(event);
     }
+    /* the index cache is a session accelerator, not something to leave
+       lying next to the users log files */
+    if(dltIndexer)
+        dltIndexer->removeSessionCacheFiles();
+
     if(searchDlg){
             searchDlg->saveSearchHistory(searchHistory);
     }

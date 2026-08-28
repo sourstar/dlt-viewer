@@ -152,7 +152,15 @@ public:
     void appendToGetLogInfoList(int value);
 
     // reset / clear file indexes
-    void clearindex() { indexAllList.clear(); }
+    void clearindex() { indexAllList.clear(); invalidateFilterMemo(); }
+
+    //! Delete the index cache files this session wrote.
+    /*! Only files written by this run are removed, so a cache left by another
+        session or tool is never touched. */
+    void removeSessionCacheFiles();
+
+    //! Drop the remembered filter result (new file, rebuilt index).
+    void invalidateFilterMemo() { memoFilterValid = false; memoFilterKey.clear(); memoFilterIndex.clear(); }
 
     // main thread routine
     void run();
@@ -214,6 +222,16 @@ private:
     // Default off: nothing may read or write the index cache until the setting
     // has actually been applied. Was previously left uninitialised.
     bool filterCacheEnabled = false;
+
+    //! Result of the last filter pass, so toggling filters off and on again
+    //! does not recompute an identical answer. Keyed the same way as the
+    //! on-disk cache, but independent of whether that is enabled.
+    QString memoFilterKey;
+    QVector<qint64> memoFilterIndex;
+    bool memoFilterValid = false;
+
+    //! Index cache files written during this run, deleted on close.
+    QStringList sessionCacheFiles;
 
     // file errors
     qint64 errors_in_file;

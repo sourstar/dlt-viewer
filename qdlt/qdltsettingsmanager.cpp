@@ -437,9 +437,9 @@ void QDltSettingsManager::readSettings()
     tempSystemPath              = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     tempUseOwn                  = settings->value("tempdir/tempUseOwn", 0).toInt();
     tempOwnPath                 = settings->value("tempdir/tempOwnPath", QString("")).toString();
-    tempCloseWithoutAsking      = settings->value("tempdir/tempCloseWithoutAsking", 0).toInt();
+    tempCloseWithoutAsking      = settings->value("tempdir/tempCloseWithoutAsking", 1).toInt();
     tempSaveOnClear             = settings->value("tempdir/tempSaveOnClear", 1).toInt();
-    tempSaveOnExit              = settings->value("tempdir/tempSaveOnExit", 1).toInt();
+    tempSaveOnExit              = settings->value("tempdir/tempSaveOnExit", 0).toInt();
 
     geometry = settings->value("geometry",0).toByteArray();
     windowState = settings->value("windowState",0).toByteArray();
