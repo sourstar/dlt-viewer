@@ -432,10 +432,22 @@ bool QDltExporter::finish()
     return true;
 }
 
-bool QDltExporter::getMsg(unsigned long int num,QDltMsg &msg,QByteArray &buf)
+bool QDltExporter::getMsg(unsigned long int num,QDltMsg &msg,QByteArray &buf,bool parseMessage)
 {
     bool result;
     buf.clear();
+
+    // parseMessage == false means the caller only needs the raw bytes. Parsing
+    // a message decodes every argument into its own heap allocation, so for a
+    // straight binary DLT export that work would be thrown away.
+    auto fill = [&](const QByteArray &data, int index) -> bool {
+        if(!parseMessage)
+            return true;
+        const bool ok = msg.setMsg(data);
+        msg.setIndex(index);
+        return ok;
+    };
+
     if(exportSelection == QDltExporter::SelectionAll)
     {
         buf = from->getMsg(num);
@@ -444,8 +456,7 @@ bool QDltExporter::getMsg(unsigned long int num,QDltMsg &msg,QByteArray &buf)
             qDebug() << "Buffer empty in" << __FILE__ << __LINE__;
             return false;
         }
-        result =  msg.setMsg(buf);
-        msg.setIndex(num);
+        result = fill(buf, num);
     }
     else if(exportSelection == QDltExporter::SelectionFiltered)
     {
@@ -455,8 +466,7 @@ bool QDltExporter::getMsg(unsigned long int num,QDltMsg &msg,QByteArray &buf)
             qDebug() << "Buffer empty in" << __FILE__ << __LINE__;
             return false;
         }
-        result =  msg.setMsg(buf);
-        msg.setIndex(from->getMsgFilterPos(num));
+        result = fill(buf, from->getMsgFilterPos(num));
     }
     else if(exportSelection == QDltExporter::SelectionSelected)
     {
@@ -466,8 +476,7 @@ bool QDltExporter::getMsg(unsigned long int num,QDltMsg &msg,QByteArray &buf)
             qDebug() << "Buffer empty in" << __FILE__ << __LINE__;
             return false;
         }
-        result =  msg.setMsg(buf);
-        msg.setIndex(from->getMsgFilterPos(selectedRows[num]));
+        result = fill(buf, from->getMsgFilterPos(selectedRows[num]));
     }
     else
     {
@@ -644,6 +653,19 @@ void QDltExporter::exportMessages()
 
     bool silentMode = !QDltOptManager::getInstance()->issilentMode();
 
+    // A binary DLT export writes the original bytes straight through. Parsing
+    // each message is then only needed if something downstream actually looks
+    // at the decoded content: a filter, a per-filter output file, or a RegEx
+    // search/replace. Skipping it avoids a full decode of every message,
+    // including one heap allocation per argument.
+    const bool parseMessages =
+        (exportFormat != QDltExporter::FormatDlt) ||
+        !filterList.isEmpty() ||
+        !multifilterFilenames.isEmpty() ||
+        (from && from->hasRegexSearchReplaceFilters());
+    if(!parseMessages)
+        qDebug() << "Binary DLT export: message decoding skipped";
+
     if ( this->stoping_index == 0 || this->stoping_index > this->size || this->stoping_index < this->starting_index )
     {
         stoping = this->size;
@@ -682,7 +704,7 @@ void QDltExporter::exportMessages()
         // TODO: Handle cancel operation
 
         // get message
-        if(false == getMsg(starting,msg,buf))
+        if(false == getMsg(starting,msg,buf,parseMessages))
         {
         //  finish();
         //qDebug() << "DLT Export getMsg failed on msg index" << starting;
@@ -709,7 +731,7 @@ void QDltExporter::exportMessages()
             //FIXME: The following does not work for non verbose messages, must be fixed to enable RegEx for DLT Export again
             //msg.setNumberOfArguments(msg.sizeArguments());
             bool isApplied = false;
-            if(from) isApplied = from->applyRegExStringMsg(msg);
+            if(from && parseMessages) isApplied = from->applyRegExStringMsg(msg);
             if(isApplied) msg.getMsg(buf,true);
         }
 

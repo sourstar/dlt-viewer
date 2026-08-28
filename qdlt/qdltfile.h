@@ -189,6 +189,9 @@ public:
     */
     QDltFilterList getFilterList() const;
 
+    //! Check whether any active filter performs a RegEx search/replace.
+    bool hasRegexSearchReplaceFilters() const { return filterList.hasRegexSearchReplace(); }
+
     //! Set current filter list
     /*!
       \param filter list.

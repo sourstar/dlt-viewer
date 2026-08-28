@@ -259,7 +259,11 @@ bool QDltFile::createIndex()
     ret = updateIndex();
 
     //qDebug() << "Create index finished - " << size() << "messages found";
-    calculateTotalSizes();
+
+    // calculateTotalSizes() is deliberately not called here. It walks every
+    // message with its own seek+read, i.e. a second full pass over the file,
+    // and its only consumer is the "DLT File Size" dialog. The getters compute
+    // it on demand instead.
 
     return ret;
 }
@@ -582,11 +586,25 @@ void QDltFile::clearFilterIndex()
 void QDltFile::addFilterIndex (int index)
 {
     indexFilterBase.append(index);
-    if (manualMarkerIndices.isEmpty()) {
-        indexFilter.append(index);
-    } else {
+
+    // Recomputing the whole merged view for every appended message is O(n) per
+    // call and therefore O(n^2) over a live session with manual markers set.
+    // The merge only has to be redone when the output order depends on message
+    // content, i.e. when sorting by time or timestamp is active.
+    if(!manualMarkerIndices.isEmpty() && (sortByTimeFlag || sortByTimestampFlag))
+    {
         recomputeEffectiveIndexFilter();
+        return;
     }
+
+    if(manualMarkerIndices.contains(index))
+    {
+        // Already present in indexFilter: it was merged in as a manual marker
+        // before it became part of the filter result.
+        return;
+    }
+
+    indexFilter.append(index);
 }
 
 #ifdef USECOLOR

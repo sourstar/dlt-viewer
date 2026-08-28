@@ -610,3 +610,16 @@ void QDltFilterList::updateSortedFilter()
     std::stable_sort(nfilters.begin(), nfilters.end(), shouldPrioritizeFilter);
 
 }
+
+bool QDltFilterList::hasRegexSearchReplace() const
+{
+    for(int numfilter=0;numfilter<pfilters.size();numfilter++)
+    {
+        const QDltFilter *filter = pfilters[numfilter];
+        if(filter->enableFilter && filter->enableRegexSearchReplace)
+        {
+            return true;
+        }
+    }
+    return false;
+}

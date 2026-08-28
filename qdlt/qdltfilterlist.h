@@ -72,6 +72,10 @@ public:
     */
     bool isEmpty();
 
+    //! Check whether any enabled filter performs a RegEx search/replace.
+    /*! Used to decide whether a message has to be decoded before exporting. */
+    bool hasRegexSearchReplace() const;
+
     //! Add a filter to the filter list.
     /*!
       \param filter the filter configuration
