@@ -498,3 +498,11 @@ bool TableModel::eventFilter(QObject *obj, QEvent *event) {
     }
     return QObject::eventFilter(obj,event);
 }
+
+Qt::ItemFlags TableModel::flags(const QModelIndex &index) const
+{
+    Qt::ItemFlags f = QAbstractTableModel::flags(index);
+    if(index.isValid())
+        f |= Qt::ItemIsEditable;
+    return f;
+}

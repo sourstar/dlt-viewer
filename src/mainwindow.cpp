@@ -80,6 +80,7 @@
 #include "jumptodialog.h"
 #include "fieldnames.h"
 #include "tablemodel.h"
+#include "textselectdelegate.h"
 #include "qdltoptmanager.h"
 #include "qdltctrlmsg.h"
 #include <qdltmsgwrapper.h>
@@ -572,6 +573,14 @@ void MainWindow::initView()
     /* set table size and en */
     ui->tableView->setModel(tableModel);
 
+    /* Let the text inside a cell be selected with the mouse and copied.
+       SelectedClicked means a click on an already selected row opens a
+       read-only editor over that cell; dragging inside it selects text, and
+       Ctrl+C or the right-click menu copies just the selection. A click on an
+       unselected row still selects the row as before. */
+    ui->tableView->setItemDelegate(new TextSelectDelegate(this));
+    ui->tableView->setEditTriggers(QAbstractItemView::SelectedClicked);
+
     // Keep marked-row traversal cache in sync with model changes.
     connect(tableModel, &QAbstractItemModel::modelReset, this, &MainWindow::invalidateMarkedRowCache);
     connect(tableModel, &QAbstractItemModel::layoutChanged, this, &MainWindow::invalidateMarkedRowCache);
@@ -789,7 +798,8 @@ void MainWindow::initSearchTable()
     m_searchresultsTable->setAutoScroll(false);
 
     m_searchresultsTable->verticalHeader()->setVisible(false);
-    m_searchresultsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_searchresultsTable->setItemDelegate(new TextSelectDelegate(this));
+    m_searchresultsTable->setEditTriggers(QAbstractItemView::SelectedClicked);
 
 
     /* set table size and en */
