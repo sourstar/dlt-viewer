@@ -17,7 +17,10 @@
 #include "qdltfile.h"
 #include "qdltfilter.h"
 #include "qdltfilterlist.h"
-#include "qdltfilereader.h"
+#if __has_include("qdltfilereader.h")
+#  include "qdltfilereader.h"
+#  define DLTBENCH_HAS_READER 1
+#endif
 
 #include <QtConcurrent>
 #include <QFuture>
@@ -135,6 +138,7 @@ int main(int argc, char **argv)
         report("  filter pass (APID match)", t.elapsed(), messages);
         out << QString("    matched %1 messages").arg(mhits) << Qt::endl;
 
+#ifdef DLTBENCH_HAS_READER
         /* Same APID filter, but split across workers, each with its own
            QDltFileReader so they do not contend on one handle or mutex. */
         const int workers = qMax(1, qMin(QThread::idealThreadCount(), 8));
@@ -166,6 +170,7 @@ int main(int argc, char **argv)
         report(QString("  filter pass (APID, %1 threads)").arg(workers).toLocal8Bit().constData(), parMs, messages);
         out << QString("    matched %1 messages%2").arg(phits)
                    .arg(phits == mhits ? "  [same as serial]" : "  *** MISMATCH ***") << Qt::endl;
+#endif
     }
     return 0;
 }
