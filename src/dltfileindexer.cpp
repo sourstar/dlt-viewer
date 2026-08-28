@@ -17,6 +17,7 @@
 #include <QFuture>
 
 #include "qdltfilereader.h"
+#include "dltfileindexerthread.h"
 
 #include "qdltoptmanager.h"
 
@@ -499,12 +500,16 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
      *  - viewer/decoder plugins, whose decodeMsg() holds a global lock and whose
      *    thread safety is not guaranteed,
      *  - sorted output, which accumulates into a shared QMap,
-     *  - the control-message side effects (version, timezone, GetLogInfo) that
-     *    modeIndexAndFilter collects,
+     *  - viewer plugins, which must see every message in file order,
      *  - small files, where the thread setup costs more than it saves.
+     *
+     * The control-message side effects that modeIndexAndFilter collects
+     * (software version, timezone, unregister-context, GetLogInfo) are gathered
+     * per chunk and replayed in file order below, so the initial load can use
+     * this path too.
      */
     const bool canRunParallel =
-        (mode == DltFileIndexer::modeFilter) &&
+        (mode == DltFileIndexer::modeFilter || mode == DltFileIndexer::modeIndexAndFilter) &&
         !sortByTimeEnabled && !sortByTimestampEnabled &&
         !getDecoderPluginsActive() &&
         activeViewerPlugins.isEmpty() &&
@@ -519,12 +524,14 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         qDebug() << "Create filter index: parallel over" << workers << "workers";
 
         QVector<QVector<qint64>> results(workers);
+        QVector<DltFileIndexerThread::SideEffects> effects(workers);
         QVector<QFuture<void>> futures;
         futures.reserve(workers);
 
         QDltFile *fileForWorkers = dltFile;
         QDltFilterList *filtersForWorkers = &filterList;
         const bool dltv2 = dltFile->getDLTv2Support();
+        const bool collectEffects = (mode == DltFileIndexer::modeIndexAndFilter);
         std::atomic<int> done{0};
 
         for(int w = 0; w < workers; w++)
@@ -534,7 +541,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
             if(from >= to)
                 continue;
 
-            futures.append(QtConcurrent::run([=, &results, &done]() {
+            futures.append(QtConcurrent::run([=, &results, &effects, &done]() {
                 QDltFileReader reader(*fileForWorkers);
                 QVector<qint64> &out = results[w];
                 out.reserve(static_cast<qsizetype>((to - from) / 8));
@@ -549,6 +556,8 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
                     if(!msg.setMsg(buf, true, dltv2))
                         continue;
                     msg.setIndex(static_cast<int>(i));
+                    if(collectEffects)
+                        DltFileIndexerThread::collectSideEffects(msg, static_cast<int>(i), effects[w]);
                     if(filtersForWorkers->checkFilter(msg))
                         out.append(static_cast<qint64>(i));
                 }
@@ -582,6 +591,30 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         indexFilterList.reserve(total);
         for(const QVector<qint64> &r : results)
             indexFilterList.append(r);
+
+        /* Replay the control-message side effects in file order, on this
+           thread, so the receivers see exactly what the serial path emits. */
+        if(collectEffects)
+        {
+            DltFileIndexerThread::SideEffects merged;
+            for(const DltFileIndexerThread::SideEffects &e : effects)
+                merged.append(e);
+
+            for(const auto &v : merged.versions)
+                emit versionString(v.first, v.second);
+            for(const auto &tz : merged.timezones)
+                emit timezone(tz.first, tz.second);
+            for(const auto &u : merged.unregisters)
+                emit unregisterContext(u[0], u[1], u[2]);
+            for(int idx : merged.getLogInfo)
+                appendToGetLogInfoList(idx);
+
+            qDebug() << "Side effects replayed:" << merged.versions.size() << "version,"
+                     << merged.timezones.size() << "timezone,"
+                     << merged.unregisters.size() << "unregister,"
+                     << merged.getLogInfo.size() << "getloginfo";
+        }
+
 
         /* marker counts still have to be attributed, cheaply, over the hits */
         computeMarkerCountsFromIndex(filterList, &indexFilterList);
