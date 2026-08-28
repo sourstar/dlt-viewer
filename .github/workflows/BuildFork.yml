@@ -1,0 +1,98 @@
+# Windows-only build for this performance fork.
+#
+# The full upstream matrix lives in BuildPR.yml. This workflow exists because
+# Windows ARM64 cannot be produced by the container in docker/: it needs the
+# MSVC ARM64 toolchain and an ARM64 Qt build, neither of which cross-hosts from
+# Linux. GitHub's windows-11-arm runner builds it natively, exactly the way
+# upstream does.
+#
+# Run it from the Actions tab (Run workflow), or let it run on a push.
+name: Build Windows (fork)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'perf/**'
+    tags:
+      - "*"
+
+jobs:
+  buildWindows_x64:
+    name: Build Windows x86_64 (MSVC)
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Install qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          modules: qtserialport
+      - name: Build with CMake
+        run: >
+          $env:WORKSPACE=$env:GITHUB_WORKSPACE;
+          $env:CPACK_7Z="true";
+          $env:CPACK_NSIS="true";
+          ./build_sdk_windows_qt6_MSVC_cmake.bat
+      - name: Archive artifact
+        uses: actions/upload-artifact@v7
+        if: ${{ success() }}
+        with:
+          name: DLTViewer-perf-windows-x86_64
+          path: |
+            build/dist/DLTViewer*.7z
+            build/dist/DLTViewer*.exe
+
+  buildWindows_arm64:
+    name: Build Windows ARM64 (MSVC)
+    runs-on: windows-11-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Install qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          modules: qtserialport
+      - name: Build with CMake
+        run: >
+          $env:WORKSPACE=$env:GITHUB_WORKSPACE;
+          $env:CPACK_7Z="true";
+          $env:CPACK_NSIS="true";
+          ./build_sdk_windows_arm_qt6_MSVC_cmake.bat
+      - name: Archive artifact
+        uses: actions/upload-artifact@v7
+        if: ${{ success() }}
+        with:
+          name: DLTViewer-perf-windows-arm64
+          path: |
+            build/dist/DLTViewer*.7z
+            build/dist/DLTViewer*.exe
+
+  buildContainer_windows_x64:
+    name: Build Windows x86_64 (container cross build)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Build image
+        run: docker build -t dlt-viewer-build:fedora42 -f docker/Dockerfile docker/
+      - name: Cross build
+        run: |
+          mkdir -p out
+          docker run --rm -v "$PWD:/src" -v "$PWD/out:/out" \
+            dlt-viewer-build:fedora42 windows-x64
+      - name: Archive artifact
+        uses: actions/upload-artifact@v7
+        if: ${{ success() }}
+        with:
+          name: DLTViewer-perf-windows-x86_64-container
+          path: out/DLTViewer-windows-x86_64.7z
