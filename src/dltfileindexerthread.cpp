@@ -65,7 +65,11 @@ void DltFileIndexerThread::processMessage(QSharedPointer<QDltMsg> &msg, int inde
     // decoded message has exactly one consumer: the filter check itself.
     const bool filterIndexOnly = (mode == DltFileIndexer::modeFilter);
 
-    if(mode == DltFileIndexer::modeIndexAndFilter || filterIndexOnly)
+    // Skip the prefilter entirely when a decoder plugin might still rewrite
+    // APID, CTID, type or subtype: judging the message before decoding would
+    // then reject messages the user's filter is actually meant to match.
+    if((mode == DltFileIndexer::modeIndexAndFilter || filterIndexOnly) &&
+       !indexer->getDecoderPluginsActive())
     {
         preDecodeDecision = filterList->checkFilterBeforeDecode(*msg);
     }

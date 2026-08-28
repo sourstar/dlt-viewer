@@ -825,6 +825,10 @@ void MainWindow::initFileHandling()
     dltIndexer->setPluginsEnabled(pluginsEnabled);
     dltIndexer->setFiltersEnabled(filtersEnabled);
 
+    // applySettings() runs before this function, when dltIndexer is still null,
+    // so its setFilterCacheEnabled() call is silently skipped. Apply it here.
+    dltIndexer->setFilterCacheEnabled(settings->filterCache);
+
     const bool sortByTimeEnabled = QDltSettingsManager::getInstance()->value("startup/sortByTimeEnabled", false).toBool();
     dltIndexer->setSortByTimeEnabled(filtersEnabled && sortByTimeEnabled);
 
@@ -2855,6 +2859,7 @@ void MainWindow::reloadLogFileDefaultFilter()
     filtersEnabled = QDltSettingsManager::getInstance()->value("startup/filtersEnabled", true).toBool();
     dltIndexer->setPluginsEnabled(pluginsEnabled);
     dltIndexer->setFiltersEnabled(filtersEnabled);
+    dltIndexer->setFilterCacheEnabled(settings->filterCache);
 
     {
         const bool sortByTimeEnabled = QDltSettingsManager::getInstance()->value("startup/sortByTimeEnabled", false).toBool();

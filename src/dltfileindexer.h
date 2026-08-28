@@ -109,6 +109,12 @@ public:
     void setPluginsEnabled(bool enable) { pluginsEnabled = enable; }
     bool getPluginsEnabled() { return pluginsEnabled; }
 
+    //! True when a decoder plugin may rewrite message fields during indexing.
+    /*! Decoder plugins (the non-verbose one in particular) overwrite APID,
+        CTID, type and subtype, so any filter decision taken before decoding
+        would be based on the wrong values. */
+    bool getDecoderPluginsActive() const { return pluginsEnabled && !activeDecoderPlugins.isEmpty(); }
+
     // enable/disable filters
     void setFiltersEnabled(bool enable) { filtersEnabled = enable; }
     bool getFiltersEnabled() { return filtersEnabled; }
@@ -205,7 +211,9 @@ private:
     bool sortByTimestampEnabled;
 
     // filter cache enabled
-    bool filterCacheEnabled;
+    // Default off: nothing may read or write the index cache until the setting
+    // has actually been applied. Was previously left uninitialised.
+    bool filterCacheEnabled = false;
 
     // file errors
     qint64 errors_in_file;

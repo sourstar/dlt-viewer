@@ -910,7 +910,7 @@ bool DltFileIndexer::loadIndexCache(QString filename)
     QDir dir(info.dir().path()+"/index");
     if (!dir.exists())
         dir.mkpath(".");
-    qDebug() << "Index Cache filename" << info.dir().path() + "/index/" +filenameCache;
+    qDebug() << "Loading index cache" << info.dir().path() + "/index/" +filenameCache;
     if(!loadIndex(info.dir().path() + "/index/" +filenameCache,indexAllList))
     {
         // loading cache file failed
@@ -936,7 +936,7 @@ bool DltFileIndexer::saveIndexCache(QString filename)
     QDir dir(info.dir().path()+"/index");
     if (!dir.exists())
         dir.mkpath(".");
-    qDebug() << "Index Cache filename" << info.dir().path() + "/index/" +filenameCache;
+    qDebug() << "Saving index cache" << info.dir().path() + "/index/" +filenameCache;
     if(!saveIndex(info.dir().path() + "/index/" +filenameCache,indexAllList))
     {
         // saving cache file failed
