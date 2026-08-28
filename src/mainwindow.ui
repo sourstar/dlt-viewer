@@ -1485,6 +1485,9 @@
      <normaloff>:/toolbar/png/view-filter_32_off.png</normaloff>
      <normalon>:/toolbar/png/view-filter_32_on.png</normalon>:/toolbar/png/view-filter_32_off.png</iconset>
    </property>
+   <property name="shortcut">
+    <string>Ctrl+Shift+F</string>
+   </property>
    <property name="text">
     <string>Enable Filters</string>
    </property>
