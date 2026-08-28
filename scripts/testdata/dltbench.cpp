@@ -107,6 +107,28 @@ int main(int argc, char **argv)
         }
         report("  filter pass (payload match)", t.elapsed(), messages);
         out << QString("    matched %1 messages").arg(hits) << Qt::endl;
+
+        /* Same walk, but a metadata-only filter (APID). This is what a
+           precomputed metadata table could answer without touching the file. */
+        QDltFilter *mfilter = new QDltFilter();
+        mfilter->type = QDltFilter::positive;
+        mfilter->enableFilter = true;
+        mfilter->enableApid = true;
+        mfilter->apid = "APP1";
+        QDltFilterList mfilters;
+        mfilters.addFilter(mfilter);
+        mfilters.updateSortedFilter();
+
+        t.start();
+        int mhits = 0;
+        for (int i = 0; i < messages; i++) {
+            const QByteArray b = file.getMsg(i);
+            if (b.isEmpty()) continue;
+            if (!msg.setMsg(b, true, false)) continue;
+            if (mfilters.checkFilter(msg)) mhits++;
+        }
+        report("  filter pass (APID match)", t.elapsed(), messages);
+        out << QString("    matched %1 messages").arg(mhits) << Qt::endl;
     }
     return 0;
 }
