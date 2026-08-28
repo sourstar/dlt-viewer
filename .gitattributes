@@ -1,1 +1,7 @@
 * text=auto
+
+# The container build scripts are executed by bash inside a Linux image, so
+# they must keep LF endings even when checked out on Windows.
+docker/*.sh text eol=lf
+docker/Dockerfile text eol=lf
+docker/*.cmake text eol=lf
