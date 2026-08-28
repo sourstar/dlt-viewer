@@ -2599,6 +2599,8 @@ void MainWindow::reloadLogFileFinishIndex()
     else
         ui->lineEditFilterEnd->setText(QString("0"));
 
+    updateActionAvailability();
+
     if (settings->autoScroll) {
         ui->tableView->scrollToBottom();
     }
@@ -4152,6 +4154,7 @@ void MainWindow::disconnectECU(EcuItem *ecuitem)
     // If this was the last active ECU, switch back to offline marker union (if enabled).
     if(settings && settings->includeManualMarkersInFilter && !isLiveLoggingActive())
         updateManualMarkerUnionInFilter();
+    updateActionAvailability();
 }
 
 void MainWindow::on_action_menuConfig_Connect_triggered()
@@ -4399,6 +4402,7 @@ void MainWindow::connectECU(EcuItem* ecuitem,bool force)
         }
     }
     checkConnectionState();
+    updateActionAvailability();
 }
 
 void MainWindow::connected()
@@ -8382,10 +8386,6 @@ void MainWindow::syncCheckBoxesAndMenu()
     ui->actionToggle_FiltersEnabled->setChecked(filtersEnabled);
     ui->actionToggle_FiltersEnabled->setText(filtersEnabled ? "Disable Filters" : "Enable Filters");
 
-    /* Nothing to switch on or off when the project holds no filters. */
-    const bool haveFilters = (project.filter->topLevelItemCount() > 0);
-    ui->actionToggle_FiltersEnabled->setEnabled(haveFilters);
-
     const bool sortByTimeEnabled = QDltSettingsManager::getInstance()->value("startup/sortByTimeEnabled", false).toBool();
     const bool sortByTimestampEnabled = QDltSettingsManager::getInstance()->value("startup/sortByTimestampEnabled", false).toBool();
     ui->actionToggle_SortByTimeEnabled->setEnabled(filtersEnabled);
@@ -8407,6 +8407,7 @@ void MainWindow::syncCheckBoxesAndMenu()
         ui->lineEditFilterStart->setStyleSheet("");
         ui->lineEditFilterEnd->setStyleSheet("");
     }
+    updateActionAvailability();
 }
 
 void MainWindow::on_applyConfig_clicked()
@@ -8843,4 +8844,51 @@ void MainWindow::handleExportResults(const QString &)
 {
     activeExporterThread = nullptr;
     statusProgressBar->hide();
+}
+
+void MainWindow::updateActionAvailability()
+{
+    /* Grey out anything that cannot do its job in the current state, so the
+       toolbar says what is possible instead of failing quietly when pressed. */
+
+    if(isSearchOngoing)
+        return;   // onSearchProgressChanged owns the enabled states while a search runs
+
+    const bool haveMessages = (qfile.size() > 0);
+    const bool haveFilters  = (project.filter->topLevelItemCount() > 0);
+    const bool haveEcus     = (project.ecu->topLevelItemCount() > 0);
+    const bool havePlugins  = !pluginManager.getPlugins().isEmpty();
+
+    bool anyConnected = false;
+    for(int num = 0; num < project.ecu->topLevelItemCount(); num++)
+    {
+        EcuItem *ecuitem = static_cast<EcuItem*>(project.ecu->topLevelItem(num));
+        if(ecuitem && ecuitem->connected)
+        {
+            anyConnected = true;
+            break;
+        }
+    }
+
+    /* nothing to show, save, search or mark without messages */
+    ui->actionClear->setEnabled(haveMessages);
+    ui->actionSaveDltFile->setEnabled(haveMessages);
+    ui->actionMarker->setEnabled(haveMessages);
+    ui->actionFind->setEnabled(haveMessages);
+    ui->actionRegExp->setEnabled(haveMessages);
+    ui->actionSearchList->setEnabled(haveMessages);
+    ui->actionFindNext->setEnabled(haveMessages);
+    ui->actionFindPrevious->setEnabled(haveMessages);
+
+    /* connecting needs somewhere to connect to; disconnecting needs a connection */
+    ui->actionConnectAll->setEnabled(haveEcus);
+    ui->actionDisconnectAll->setEnabled(anyConnected);
+
+    /* keep the toolbar action in step with the Apply button, which already
+       knows whether there is a configuration worth applying */
+    ui->actionApply_Configuration->setEnabled(ui->applyConfig->isEnabled());
+
+    /* a toggle with nothing to toggle only costs a pass over the file */
+    ui->actionToggle_FiltersEnabled->setEnabled(haveFilters);
+    ui->actionToggle_PluginsEnabled->setEnabled(havePlugins);
 }

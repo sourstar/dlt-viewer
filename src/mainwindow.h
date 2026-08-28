@@ -339,6 +339,9 @@ private:
 
     void syncCheckBoxesAndMenu();
 
+    //! Enable or disable actions according to what is currently loaded.
+    void updateActionAvailability();
+
     void updateRecentFileActions();
     void setCurrentFile(const QString &fileName);
     void removeCurrentFile(const QString &fileName);
