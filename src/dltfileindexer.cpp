@@ -121,13 +121,15 @@ bool DltFileIndexer::index(int num)
     // clear old index
     indexAllList.clear();
 
-    // Pre-size the index. A DLT message with a storage header is never much
-    // smaller than 64 bytes, so file size / 64 is a safe upper bound on the
-    // message count and removes the repeated reallocation of a vector that
-    // grows to millions of entries.
+    // Pre-size the index from an estimated average message size. This is a
+    // hint, not a bound: a smaller average simply costs a few reallocations,
+    // while a too-generous one wastes real memory (each entry is 8 bytes, and
+    // a large file has millions of them). 128 bytes is a realistic average for
+    // DLT traffic -- a 16-byte storage header, a 4..14 byte header and a
+    // payload -- and keeps the estimate on the conservative side.
     if(f.size() > 0)
     {
-        indexAllList.reserve(static_cast<qsizetype>(f.size() / 64) + 1);
+        indexAllList.reserve(static_cast<qsizetype>(f.size() / 128) + 1);
     }
 
     // check if file is empty
