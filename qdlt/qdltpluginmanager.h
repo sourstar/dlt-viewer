@@ -8,6 +8,7 @@
 #include "export_rules.h"
 
 #include <QDir>
+#include <QReadWriteLock>
 
 //! Manage all DLT Plugins
 /*!
@@ -15,7 +16,7 @@
 */
 
 class QDltPlugin;
-class QMutex;
+
 
 class QDLT_EXPORT QDltPluginManager : public QDltMessageDecoder
 {
@@ -51,6 +52,10 @@ public:
     */
     void decodeMsg(QDltMsg &msg,int triggeredByUser) override;
 
+    //! True when every enabled decoder plugin is safe to run from several
+    //! threads at once. See the implementation for what that means.
+    bool decodersAreReentrant() const;
+
     //! Get the list of pointers to all loaded plugins
     QList<QDltPlugin*> getPlugins() const { return plugins; }
 
@@ -81,7 +86,13 @@ public:
     QStringList getPluginPriorities() const;
 
 private:
-    mutable QMutex pluginListMutex;
+    //! Guards the plugin list.
+    /*! A read-write lock rather than a mutex: decodeMsg() is called once per
+        message and only reads the list, so an exclusive lock there serialised
+        every decode -- including across the workers of the parallel filter
+        pass. Only loading, unloading and reordering plugins take it for
+        writing. */
+    mutable QReadWriteLock pluginListMutex;
 
     //! The list of pointers to all loaded plugins
     QList<QDltPlugin*> plugins;

@@ -511,7 +511,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     const bool canRunParallel =
         (mode == DltFileIndexer::modeFilter || mode == DltFileIndexer::modeIndexAndFilter) &&
         !sortByTimeEnabled && !sortByTimestampEnabled &&
-        !getDecoderPluginsActive() &&
+        (!getDecoderPluginsActive() || (pluginManager && pluginManager->decodersAreReentrant())) &&
         activeViewerPlugins.isEmpty() &&
         ((end - start) >= 200000);
 
@@ -532,6 +532,8 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         QDltFilterList *filtersForWorkers = &filterList;
         const bool dltv2 = dltFile->getDLTv2Support();
         const bool collectEffects = (mode == DltFileIndexer::modeIndexAndFilter);
+        const bool decodeInWorkers = pluginsEnabled && pluginManager && getDecoderPluginsActive();
+        QDltPluginManager *pluginsForWorkers = pluginManager;
         std::atomic<int> done{0};
         std::atomic<quint64> processed{0};   //!< messages examined, for the progress bar
 
@@ -561,6 +563,8 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
                     msg.setIndex(static_cast<int>(i));
                     if(collectEffects)
                         DltFileIndexerThread::collectSideEffects(msg, static_cast<int>(i), effects[w]);
+                    if(decodeInWorkers)
+                        pluginsForWorkers->decodeMsg(msg, silentMode);
                     if(filtersForWorkers->checkFilter(msg))
                         out.append(static_cast<qint64>(i));
                 }
