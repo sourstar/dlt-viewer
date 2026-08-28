@@ -171,10 +171,18 @@ bool QDltArgument::setArgument(QByteArray &payload,unsigned int &offset, QDlt::D
                 length3 = DLT_SWAP_16((*((unsigned short*) (payload.constData()+offset))));
             offset += sizeof(unsigned short);
         }
+        /* length2 and length3 come straight out of the payload. QByteArray::mid()
+           clamps, so a bogus length cannot read out of bounds, but advancing
+           offset past the end silently desynchronises every argument that
+           follows. Reject the message instead. */
+        if((unsigned int)payload.size() < (offset + length2))
+            return false;
         name = QString(payload.mid(offset,length2));
         offset += length2;
         if(typeInfo == DltTypeInfoSInt || typeInfo == DltTypeInfoUInt || typeInfo == DltTypeInfoFloa)
         {
+            if((unsigned int)payload.size() < (offset + length3))
+                return false;
             unit = QString(payload.mid(offset,length3));
             offset += length3;
         }

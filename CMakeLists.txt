@@ -71,7 +71,12 @@ if(CMAKE_COMPILER_IS_GNUCXX)
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -pedantic -Wno-variadic-macros -Wno-strict-aliasing -fPIC")
 endif()
 
-add_compile_definitions(QT5)
+# Only define QT5 for an actual Qt5 build. This used to be unconditional, so
+# every Qt6 build compiled with -DQT5 set -- harmless only because nothing
+# currently tests bare QT5, and a trap for anyone who adds an #ifdef QT5.
+if("${QT_PREFIX}" STREQUAL "Qt5")
+    add_compile_definitions(QT5)
+endif()
 set(QT5_QT6_COMPAT_VERSION "5.14")
 # add compiler definition to be used for >= Qt 5.14 code
 if(${QT_PREFIX}Core_VERSION VERSION_GREATER_EQUAL ${QT5_QT6_COMPAT_VERSION})

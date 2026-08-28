@@ -45,7 +45,11 @@ protected:
     bool lessThan(const QModelIndex &left, const QModelIndex &right) const override;
 
 private:
-    void updateFilter();
+    // Qt 6.10 replaced invalidateFilter() with beginFilterChange()/
+    // endFilterChange(), which must *surround* the change to the filter
+    // criteria: beginFilterChange() captures the pre-change state.
+    void beginCriteriaChange();
+    void endCriteriaChange();
 
     QString ecu;
     QSet<QString> ecuIdList;
