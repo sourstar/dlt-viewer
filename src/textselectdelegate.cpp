@@ -14,6 +14,7 @@ QWidget *TextSelectDelegate::createEditor(QWidget *parent, const QStyleOptionVie
     Q_UNUSED(index)
 
     QLineEdit *editor = new QLineEdit(parent);
+    m_lastEditor = editor;
     editor->setReadOnly(true);
     editor->setFrame(false);
     /* keep the cell looking like a cell rather than an input field */

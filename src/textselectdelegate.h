@@ -1,6 +1,7 @@
 #ifndef TEXTSELECTDELEGATE_H
 #define TEXTSELECTDELEGATE_H
 
+#include <QPointer>
 #include <QStyledItemDelegate>
 
 /**
@@ -28,6 +29,16 @@ public:
                       const QModelIndex &index) const override;
     void updateEditorGeometry(QWidget *editor, const QStyleOptionViewItem &option,
                               const QModelIndex &index) const override;
+
+    //! The editor most recently created by createEditor().
+    /*! createEditor() runs synchronously inside QAbstractItemView::edit(),
+        so the caller can pick the editor up straight afterwards. Looking it
+        up by position instead is unreliable: the widget may not be shown
+        yet, and QWidget::childAt() skips hidden children. */
+    QWidget *lastEditor() const { return m_lastEditor; }
+
+private:
+    mutable QPointer<QWidget> m_lastEditor;
 };
 
 #endif // TEXTSELECTDELEGATE_H

@@ -533,6 +533,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         const bool dltv2 = dltFile->getDLTv2Support();
         const bool collectEffects = (mode == DltFileIndexer::modeIndexAndFilter);
         std::atomic<int> done{0};
+        std::atomic<quint64> processed{0};   //!< messages examined, for the progress bar
 
         for(int w = 0; w < workers; w++)
         {
@@ -541,13 +542,15 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
             if(from >= to)
                 continue;
 
-            futures.append(QtConcurrent::run([=, &results, &effects, &done]() {
+            futures.append(QtConcurrent::run([=, &results, &effects, &done, &processed]() {
                 QDltFileReader reader(*fileForWorkers);
                 QVector<qint64> &out = results[w];
                 out.reserve(static_cast<qsizetype>((to - from) / 8));
                 QDltMsg msg;
                 for(quint64 i = from; i < to; i++)
                 {
+                    if((i - from) % 4096 == 4095)
+                        processed.fetch_add(4096, std::memory_order_relaxed);
                     if(stopFlag)
                         break;
                     const QByteArray buf = reader.getMsg(static_cast<int>(i));
@@ -565,7 +568,12 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
             }));
         }
 
-        /* keep the progress bar moving without blocking the workers */
+        /* Keep the progress bar moving without blocking the workers. Report
+           messages examined rather than workers finished: with 8 chunks that
+           only ever produced 0, 12, 25 ... and in practice looked like a jump
+           straight from 0 to 100. */
+        unsigned int lastPercent = 0;
+        unsigned int nextLogMark = 10;
         while(true)
         {
             bool allDone = true;
@@ -573,9 +581,21 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
                 if(!f.isFinished()) { allDone = false; break; }
             if(allDone)
                 break;
-            const int finished = done.load();
-            emit progress(qMin(99, (finished * 100) / qMax(1, futures.size())));
-            QThread::msleep(50);
+
+            const quint64 seen = processed.load(std::memory_order_relaxed);
+            const unsigned int percent =
+                (span > 0) ? static_cast<unsigned int>(qMin<quint64>(99, (seen * 100) / span)) : 99;
+            if(percent != lastPercent)
+            {
+                lastPercent = percent;
+                emit progress(percent);
+                if(percent >= nextLogMark)
+                {
+                    qDebug() << "CFI:" << percent << "%";
+                    nextLogMark = ((percent / 10) + 1) * 10;
+                }
+            }
+            QThread::msleep(25);
         }
         for(QFuture<void> &f : futures)
             f.waitForFinished();

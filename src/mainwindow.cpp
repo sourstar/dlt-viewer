@@ -8606,6 +8606,13 @@ void MainWindow::on_actionDefault_Filter_Create_Index_triggered()
 
 void MainWindow::applyConfigEnabled(bool enabled)
 {
+    /* Nothing to apply when the project holds no filters at all: enabling the
+       button then just invites a full refilter that cannot change anything. */
+    if(enabled && project.filter->topLevelItemCount() == 0)
+    {
+        enabled = false;
+    }
+
     //qDebug() << "applyConfigEnabled" << enabled << __LINE__;
     if(true == enabled)
     {
@@ -8623,6 +8630,7 @@ void MainWindow::applyConfigEnabled(bool enabled)
         /* hide apply config button */
         //ui->applyConfig->stopPulsing();
         ui->actionApply_Configuration->setCheckable(false);
+        ui->actionApply_Configuration->setChecked(false);
         ui->applyConfig->setEnabled(false);
     }
 }

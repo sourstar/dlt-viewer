@@ -4,6 +4,8 @@
 #include <QDebug>
 #include <QItemSelectionModel>
 #include <QLineEdit>
+
+#include "textselectdelegate.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 
@@ -104,7 +106,16 @@ void DltTableView::mouseMoveEvent(QMouseEvent *event)
             const QModelIndex index = pressIndex;
             if(edit(index, QAbstractItemView::AllEditTriggers, event))
             {
-                textDragEditor = qobject_cast<QLineEdit*>(viewport()->childAt(pressPos));
+                /* Ask the delegate which editor it just made. childAt() cannot
+                   be used here: the widget may not be shown yet, and it skips
+                   hidden children. */
+                if(TextSelectDelegate *d = qobject_cast<TextSelectDelegate*>(itemDelegateForIndex(index)))
+                    textDragEditor = d->lastEditor();
+                else
+                    textDragEditor = viewport()->childAt(pressPos);
+
+                if(textDragEditor && !textDragEditor->isVisible())
+                    textDragEditor->show();
                 if(textDragEditor)
                 {
                     /* replay the original press so the editor starts a selection
