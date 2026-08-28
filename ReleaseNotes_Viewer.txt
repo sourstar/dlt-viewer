@@ -5,7 +5,7 @@ Gernot Wirschal <Gernot.Wirschal@bmw.de>
 Shubham Shaha <Shubham.Shaha@bti.bmwgroup.com>
 Version
 -------
-Version 2.30.0 UNSTABLE
+Version 2.30.1 UNSTABLE
 
 Known issues
 ------------
@@ -14,6 +14,24 @@ Known issues
 
 Changes
 -------
+
+2.30.1
+
+* Performance: message index built without a redundant second pass over the file
+* Performance: 4 MiB read-ahead buffer in QDltFile, replacing one seek+read per message
+* Performance: index cache read/written in 4 MiB chunks instead of one qint64 per I/O call
+* Performance: filter matching reuses per-message header/payload strings (gernotmuc)
+* Performance: metadata-only prefilter before decoding (gernotmuc)
+* Performance: binary DLT export no longer decodes messages it only copies
+* Fix: thread priorities were discarded (setPriority before start) at all 15 call sites
+* Fix: plugin search no longer depends on the current working directory
+* Fix: Index Cache setting now reaches the indexer
+* Fix: empty scratch files no longer accumulate in the cache directory
+* Fix: bounds checks on argument name/unit lengths
+* Fix: filter refresh on Qt 6.10+ (beginFilterChange/endFilterChange ordering)
+* Fix: QT5 no longer defined for Qt6 builds
+* Build: containerized Windows cross build, Windows ARM64 CI job
+* Test: synthetic DLT file generator and GUI-free parsing benchmark
 
 2.30.0
 
