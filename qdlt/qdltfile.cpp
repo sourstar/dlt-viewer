@@ -1149,3 +1149,28 @@ void QDltFile::calculateTotalSizes()
         totalPayloadSize += msgSizeCache[i].payloadSize;
     }
 }
+
+QString QDltFile::getFileNameConst(int num) const
+{
+    if(num<0 || num>=files.size())
+        return QString();
+
+    return files[num]->infile.fileName();
+}
+
+qint64 QDltFile::getFileSizeConst(int num) const
+{
+    if(num<0 || num>=files.size())
+        return 0;
+
+    return files[num]->infile.size();
+}
+
+QVector<qint64> QDltFile::getIndexAll(int num) const
+{
+    if(num<0 || num>=files.size())
+        return QVector<qint64>();
+
+    QMutexLocker locker(&mutexQDlt);
+    return files[num]->indexAll;   // implicitly shared: no deep copy
+}

@@ -12,6 +12,11 @@
 #include <QFileInfo>
 #include <vector>
 #include <limits>
+#include <atomic>
+#include <QtConcurrent>
+#include <QFuture>
+
+#include "qdltfilereader.h"
 
 #include "qdltoptmanager.h"
 
@@ -482,6 +487,111 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     unsigned int progressCounter = 1;
     emit progress(0);
 
+    /* Parallel filter pass.
+     *
+     * Deciding whether a message matches is independent per message, and on the
+     * measured 500 MiB sample the match itself is ~2% of the cost -- the rest is
+     * fetching and parsing. That is embarrassingly parallel, but QDltFile
+     * serialises every fetch on one mutex and one file handle, so each worker
+     * gets its own QDltFileReader instead.
+     *
+     * The serial path is kept for the cases the parallel one cannot serve:
+     *  - viewer/decoder plugins, whose decodeMsg() holds a global lock and whose
+     *    thread safety is not guaranteed,
+     *  - sorted output, which accumulates into a shared QMap,
+     *  - the control-message side effects (version, timezone, GetLogInfo) that
+     *    modeIndexAndFilter collects,
+     *  - small files, where the thread setup costs more than it saves.
+     */
+    const bool canRunParallel =
+        (mode == DltFileIndexer::modeFilter) &&
+        !sortByTimeEnabled && !sortByTimestampEnabled &&
+        !getDecoderPluginsActive() &&
+        activeViewerPlugins.isEmpty() &&
+        ((end - start) >= 200000);
+
+    if(canRunParallel)
+    {
+        const int workers = qMax(1, qMin(QThread::idealThreadCount(), 8));
+        const quint64 span = end - start;
+        const quint64 chunk = (span + workers - 1) / workers;
+
+        qDebug() << "Create filter index: parallel over" << workers << "workers";
+
+        QVector<QVector<qint64>> results(workers);
+        QVector<QFuture<void>> futures;
+        futures.reserve(workers);
+
+        QDltFile *fileForWorkers = dltFile;
+        QDltFilterList *filtersForWorkers = &filterList;
+        const bool dltv2 = dltFile->getDLTv2Support();
+        std::atomic<int> done{0};
+
+        for(int w = 0; w < workers; w++)
+        {
+            const quint64 from = start + (quint64)w * chunk;
+            const quint64 to = qMin<quint64>(from + chunk, end);
+            if(from >= to)
+                continue;
+
+            futures.append(QtConcurrent::run([=, &results, &done]() {
+                QDltFileReader reader(*fileForWorkers);
+                QVector<qint64> &out = results[w];
+                out.reserve(static_cast<qsizetype>((to - from) / 8));
+                QDltMsg msg;
+                for(quint64 i = from; i < to; i++)
+                {
+                    if(stopFlag)
+                        break;
+                    const QByteArray buf = reader.getMsg(static_cast<int>(i));
+                    if(buf.isEmpty())
+                        continue;
+                    if(!msg.setMsg(buf, true, dltv2))
+                        continue;
+                    msg.setIndex(static_cast<int>(i));
+                    if(filtersForWorkers->checkFilter(msg))
+                        out.append(static_cast<qint64>(i));
+                }
+                done.fetch_add(1);
+            }));
+        }
+
+        /* keep the progress bar moving without blocking the workers */
+        while(true)
+        {
+            bool allDone = true;
+            for(const QFuture<void> &f : futures)
+                if(!f.isFinished()) { allDone = false; break; }
+            if(allDone)
+                break;
+            const int finished = done.load();
+            emit progress(qMin(99, (finished * 100) / qMax(1, futures.size())));
+            QThread::msleep(50);
+        }
+        for(QFuture<void> &f : futures)
+            f.waitForFinished();
+
+        if(stopFlag)
+            return false;
+
+        /* concatenate in chunk order: each chunk is already ascending, and the
+           chunks are contiguous, so the result is sorted by construction */
+        qsizetype total = 0;
+        for(const QVector<qint64> &r : results)
+            total += r.size();
+        indexFilterList.reserve(total);
+        for(const QVector<qint64> &r : results)
+            indexFilterList.append(r);
+
+        /* marker counts still have to be attributed, cheaply, over the hits */
+        computeMarkerCountsFromIndex(filterList, &indexFilterList);
+
+        emit(progress(100));
+        qDebug() << "CFI:" << 100 << "%";
+        qDebug() << "Create filter index: Finish (parallel)";
+    }
+    else
+    {
     // Start reading messages
     for(ix=start;ix<end;ix++)
     {
@@ -490,14 +600,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         if(!dltFile->getMsg(ix, *msg))
             continue; // Skip broken messages
 
-        /*if(true == useIndexerThread)
-        {
-            indexerThread.enqueueMessage(msg, ix);
-        }
-        else
-        {*/
-            indexerThread.processMessage(msg, ix);
-        //}
+        indexerThread.processMessage(msg, ix);
 
         if((end-start)!=0)
             iPercent = ( (ix-start)*100 )/(end-start);
@@ -532,6 +635,8 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
 
     // update performance counter
     //msecsFilterCounter = time.elapsed();
+    } // end of the serial path
+
 
     // use sorted values if sort by time enabled
     if(sortByTimeEnabled || sortByTimestampEnabled)
