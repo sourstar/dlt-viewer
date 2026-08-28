@@ -77,7 +77,7 @@ public:
     /*!
       \param _time The time when the DLT message is logged.
     */
-    void setTime(unsigned int _time) { time = _time; }
+    void setTime(unsigned int _time) { time = _time; invalidateHeaderStringCache(); }
 
     //! Get the time of the message as a formatted string.
     /*!
@@ -103,7 +103,7 @@ public:
     /*!
       \param _microseconds The microseconds when the DLT message is logged.
     */
-    void setMicroseconds(unsigned int _microseconds) { microseconds = _microseconds; }
+    void setMicroseconds(unsigned int _microseconds) { microseconds = _microseconds; invalidateHeaderStringCache(); }
 
     //! Get the uptime of the DLT message, when the DLT message is generated.
     /*!
@@ -115,7 +115,7 @@ public:
     /*!
       \param _timestamp The uptime when the DLT message is generated.
     */
-    void setTimestamp(unsigned int _timestamp) { timestamp = _timestamp; }
+    void setTimestamp(unsigned int _timestamp) { timestamp = _timestamp; invalidateHeaderStringCache(); }
 
     //! Get the session id of the DLT message.
     /*!
@@ -127,7 +127,7 @@ public:
     /*!
       \param _sessionid The session id of the DLT message.
     */
-    void setSessionid(unsigned int _sessionid) { sessionid = _sessionid; }
+    void setSessionid(unsigned int _sessionid) { sessionid = _sessionid; invalidateHeaderStringCache(); }
 
     //! Get the session name of the DLT message.
     /*!
@@ -153,7 +153,7 @@ public:
       The message counter is increased by one for each message of a context.
       \param _messageCounter The message counter.
     */
-    void setMessageCounter(unsigned char _messageCounter) { messageCounter = _messageCounter; }
+    void setMessageCounter(unsigned char _messageCounter) { messageCounter = _messageCounter; invalidateHeaderStringCache(); }
 
     //! Get the ecu id of the DLT message.
     /*!
@@ -161,11 +161,13 @@ public:
     */
     QString getEcuid() const { return ecuid; }
 
+    const QString &getEcuidRef() const { return ecuid; }
+
     //! Set the ecu id of the DLT message.
     /*!
       \param _ecuid The ecu id of the DLT message.
     */
-    void setEcuid(QString _ecuid) { ecuid = _ecuid; }
+    void setEcuid(QString _ecuid) { ecuid = _ecuid; invalidateHeaderStringCache(); }
 
     //! Get the application id of the DLT message.
     /*!
@@ -173,11 +175,13 @@ public:
     */
     QString getApid() const { return apid; }
 
+    const QString &getApidRef() const { return apid; }
+
     //! Set the application id of the DLT message.
     /*!
       \param id The application id.
     */
-    void setApid(QString id) { apid = id; }
+    void setApid(QString id) { apid = id; invalidateHeaderStringCache(); }
 
     //! Get the context id of the DLT message.
     /*!
@@ -185,11 +189,13 @@ public:
     */
     QString getCtid() const { return ctid; }
 
+    const QString &getCtidRef() const { return ctid; }
+
     //! Set the context id of the DLT message.
     /*!
       \param id The context id.
     */
-    void setCtid(QString id) { ctid = id; }
+    void setCtid(QString id) { ctid = id; invalidateHeaderStringCache(); }
 
     //! Get the type of the DLT message.
     /*!
@@ -205,7 +211,7 @@ public:
       \sa DltTypeDef
       \param _type The type of the DLT message.
     */
-    void setType(DltTypeDef _type) { type = _type; }
+    void setType(DltTypeDef _type) { type = _type; invalidateHeaderStringCache(); invalidatePayloadStringCache(); }
 
     //! Get the text of the type of the DLT message.
     /*!
@@ -225,7 +231,7 @@ public:
       \sa DltEndiannessDef
       \param _endianness The endianness of the DLT message.
     */
-    void setEndianness(QDlt::DltEndiannessDef _endianness) { endianness = _endianness; }
+    void setEndianness(QDlt::DltEndiannessDef _endianness) { endianness = _endianness; invalidatePayloadStringCache(); }
 
     //! Get the text of the endianness of the DLT message.
     /*!
@@ -249,7 +255,7 @@ public:
       The subtype depends on the type.
       \param _subtype The subtype of the DLT message.
     */
-    void setSubtype(unsigned char _subtype) { subtype = _subtype; }
+    void setSubtype(unsigned char _subtype) { subtype = _subtype; invalidateHeaderStringCache(); invalidatePayloadStringCache(); }
 
     //! Get the text of the subtype.
     /*!
@@ -271,7 +277,7 @@ public:
       DLT Ctrl messages are also in non-verbose mode.
       \param _mode The mode of the DLT message.
     */
-    void setMode(DltModeDef _mode) { mode = _mode; }
+    void setMode(DltModeDef _mode) { mode = _mode; invalidateHeaderStringCache(); invalidatePayloadStringCache(); }
 
     //! Get the text of the mode (verbose or non-verbose).
     /*!
@@ -295,7 +301,7 @@ public:
       E.g. if a non-verbose message is decoded these two parameters are different.
       \param noargs The number of arguments in the payload.
     */
-    void setNumberOfArguments(unsigned char noargs) { numberOfArguments = noargs; }
+    void setNumberOfArguments(unsigned char noargs) { numberOfArguments = noargs; invalidateHeaderStringCache(); invalidatePayloadStringCache(); }
 
     //! Get the binary header of the DLT message.
     /*!
@@ -328,7 +334,7 @@ public:
       Be careful with this function, binary data and interpreted data will not be in sync anymore.
       \param data The new payload of the DLT message
     */
-    void setPayload(QByteArray &data) { payload = data; }
+    void setPayload(QByteArray &data) { payload = data; invalidatePayloadStringCache(); }
 
     //! Generate binary header and payload.
     /*!
@@ -457,11 +463,15 @@ public:
     */
     QString toStringHeader() const;
 
+    const QString &toStringHeaderRef() const;
+
     //! Print Payload content into a string.
     /*!
       \return The payload string.
     */
     QString toStringPayload() const;
+
+    const QString &toStringPayloadRef() const;
 
     // Setter and Getters for new DLTv2 parameters
     uint8_t getVersionNumber() const;
@@ -537,6 +547,9 @@ public:
     void setIndex(int newIndex);
 
 private:
+
+    void invalidateHeaderStringCache() const;
+    void invalidatePayloadStringCache() const;
 
     //! The header parameter ECU Id.
     QString ecuid;
@@ -633,6 +646,11 @@ private:
 
     //! Position of current file in a QDltFile
     int index;
+
+    mutable QString cachedHeaderString;
+    mutable QString cachedPayloadString;
+    mutable bool hasCachedHeaderString = false;
+    mutable bool hasCachedPayloadString = false;
 
 };
 

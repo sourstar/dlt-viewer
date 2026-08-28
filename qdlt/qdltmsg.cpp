@@ -252,6 +252,19 @@ QString QDltMsg::getCtrlReturnTypeString() const
 {
     return QString(( ctrlReturnType<=8 )?qDltCtrlReturnType[ctrlReturnType]:"");
 }
+
+void QDltMsg::invalidateHeaderStringCache() const
+{
+    cachedHeaderString.clear();
+    hasCachedHeaderString = false;
+}
+
+void QDltMsg::invalidatePayloadStringCache() const
+{
+    cachedPayloadString.clear();
+    hasCachedPayloadString = false;
+}
+
 QString QDltMsg::getTimeString() const
 {
     return cachedTimeString(time);
@@ -1034,6 +1047,7 @@ bool QDltMsg::parseArguments()
 
     /* get the arguments of the payload */
     if(mode==DltModeVerbose) {
+        invalidatePayloadStringCache();
         arguments.clear();
         for(int num=0;num<numberOfArguments;num++) {
             if(argument.setArgument(payload,offset,endianness)==false) {
@@ -1145,6 +1159,9 @@ bool QDltMsg::getMsg(QByteArray &buf,bool withStorageHeader) {
 
 void QDltMsg::clear()
 {
+    invalidateHeaderStringCache();
+    invalidatePayloadStringCache();
+
     ecuid.clear();
     apid.clear();
     ctid.clear();
@@ -1203,6 +1220,7 @@ void QDltMsg::clear()
 void QDltMsg::clearArguments()
 {
     arguments.clear();
+    invalidatePayloadStringCache();
 }
 
 int QDltMsg::sizeArguments() const
@@ -1226,16 +1244,28 @@ void QDltMsg::addArgument(QDltArgument argument, int index)
         arguments.append(argument);
     else
         arguments.insert(index,argument);
+
+    invalidatePayloadStringCache();
 }
 
 void QDltMsg::removeArgument(int index)
 {
     arguments.removeAt(index);
+    invalidatePayloadStringCache();
 }
 
 
 QString QDltMsg::toStringHeader() const
 {
+    return toStringHeaderRef();
+}
+
+const QString &QDltMsg::toStringHeaderRef() const
+{
+    if (hasCachedHeaderString) {
+        return cachedHeaderString;
+    }
+
     QString text;
     text.reserve(1024);
 
@@ -1253,11 +1283,22 @@ QString QDltMsg::toStringHeader() const
     // Cache the non-time/counter suffix across messages (ECU/APID/CTID/etc.).
     text += cachedHeaderSuffix(*this);
 
-    return text;
+    cachedHeaderString = text;
+    hasCachedHeaderString = true;
+    return cachedHeaderString;
 }
 
 QString QDltMsg::toStringPayload() const
 {
+    return toStringPayloadRef();
+}
+
+const QString &QDltMsg::toStringPayloadRef() const
+{
+    if (hasCachedPayloadString) {
+        return cachedPayloadString;
+    }
+
     QString text;
     QDltArgument argument;
     QByteArray data;
@@ -1276,14 +1317,18 @@ QString QDltMsg::toStringPayload() const
             text += "|";
             text += QDlt::toAscii(data, false);
         }
-        return text;
+        cachedPayloadString = text;
+        hasCachedPayloadString = true;
+        return cachedPayloadString;
     }
 
     if( getType()==QDltMsg::DltTypeControl && getSubtype()==QDltMsg::DltControlResponse) {
 
         if(getCtrlServiceId() == DLT_SERVICE_ID_MARKER)
         {
-            return "MARKER";
+            cachedPayloadString = QStringLiteral("MARKER");
+            hasCachedPayloadString = true;
+            return cachedPayloadString;
         }
 
         text += QString("[%1 %2] ").arg(getCtrlServiceIdString()).arg(getCtrlReturnTypeString());
@@ -1345,7 +1390,9 @@ QString QDltMsg::toStringPayload() const
             text += QDlt::toAscii(data);
         }
 
-        return text;
+        cachedPayloadString = text;
+        hasCachedPayloadString = true;
+        return cachedPayloadString;
     }
 
     if( getType()==QDltMsg::DltTypeControl) {
@@ -1353,7 +1400,9 @@ QString QDltMsg::toStringPayload() const
         data = payload.mid(4,(payload.size()>260)?256:(payload.size()-4));
         text += QDlt::toAscii(data);
 
-        return text;
+        cachedPayloadString = text;
+        hasCachedPayloadString = true;
+        return cachedPayloadString;
     }
 
     if(withSegementation && arguments.isEmpty())
@@ -1374,7 +1423,9 @@ QString QDltMsg::toStringPayload() const
         {
             text += "Segmentation: Abort Frame with abort reason " + QString("%1").arg(segmentationAbortReason);;
         }
-        return text;
+        cachedPayloadString = text;
+        hasCachedPayloadString = true;
+        return cachedPayloadString;
     }
 
     for(int num=0;num<arguments.size();num++) {
@@ -1387,7 +1438,9 @@ QString QDltMsg::toStringPayload() const
 
     }
 
-    return text;
+    cachedPayloadString = text;
+    hasCachedPayloadString = true;
+    return cachedPayloadString;
 }
 
 uint8_t QDltMsg::getVersionNumber() const
@@ -1398,6 +1451,7 @@ uint8_t QDltMsg::getVersionNumber() const
 void QDltMsg::setVersionNumber(uint8_t newVersionNumber)
 {
     versionNumber = newVersionNumber;
+    invalidatePayloadStringCache();
 }
 
 bool QDltMsg::getWithSessionId() const
@@ -1488,6 +1542,7 @@ bool QDltMsg::getWithSegementation() const
 void QDltMsg::setWithSegementation(bool newWithSegementation)
 {
     withSegementation = newWithSegementation;
+    invalidatePayloadStringCache();
 }
 
 bool QDltMsg::getWithPrivacyLevel() const
@@ -1588,6 +1643,7 @@ quint8 QDltMsg::getSegmentationFrameType() const
 void QDltMsg::setSegmentationFrameType(quint8 newSegmentationFrameType)
 {
     segmentationFrameType = newSegmentationFrameType;
+    invalidatePayloadStringCache();
 }
 
 quint64 QDltMsg::getSegmentationTotalLength() const
@@ -1598,6 +1654,7 @@ quint64 QDltMsg::getSegmentationTotalLength() const
 void QDltMsg::setSegmentationTotalLength(quint64 newSegmentationTotalLength)
 {
     segmentationTotalLength = newSegmentationTotalLength;
+    invalidatePayloadStringCache();
 }
 
 quint32 QDltMsg::getSegmentationConsecutiveFrame() const
@@ -1608,6 +1665,7 @@ quint32 QDltMsg::getSegmentationConsecutiveFrame() const
 void QDltMsg::setSegmentationConsecutiveFrame(quint32 newSegmentationConsecutiveFrame)
 {
     segmentationConsecutiveFrame = newSegmentationConsecutiveFrame;
+    invalidatePayloadStringCache();
 }
 
 quint8 QDltMsg::getSegmentationAbortReason() const
@@ -1618,6 +1676,7 @@ quint8 QDltMsg::getSegmentationAbortReason() const
 void QDltMsg::setSegmentationAbortReason(quint8 newSegmentationAbortReason)
 {
     segmentationAbortReason = newSegmentationAbortReason;
+    invalidatePayloadStringCache();
 }
 
 int QDltMsg::getIndex() const
@@ -1639,6 +1698,7 @@ void QDltMsg::genMsg()
 
     // clear existing payload
     payload.clear();
+    invalidatePayloadStringCache();
 
     // Generate payload for all arguments
     for(int num=0;num<arguments.size();num++) {
