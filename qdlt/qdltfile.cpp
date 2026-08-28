@@ -103,6 +103,10 @@ void QDltFile::setDltIndex(QVector<qint64> &_indexAll, int num)
         return;
     }
 
+    /* getMsg() reads indexAll under mutexQDlt from the GUI thread while the
+       indexer thread publishes a new one here; take the same lock. */
+    QMutexLocker locker(&mutexQDlt);
+
     files[num]->indexAll = _indexAll;
     files[num]->invalidateReadBuffer();
 }
@@ -734,10 +738,22 @@ QByteArray QDltFile::getMsg(int index) const
         return QByteArray();
     }
 
-    if(msgLength >= DLT_FILE_READ_AHEAD_SIZE)
+    /* Only take over the buffer for an access that continues forward from it
+       (or when it is empty). Parallel Find-All runs several threads over
+       disjoint regions of the same file; without this test each thread would
+       evict the others' block and every message would cost a 4 MiB read. With
+       it, one scan keeps the buffer and the others fall back to the direct
+       read they did before, so the worst case is the old behaviour. */
+    const bool continuesBuffer =
+        (file->readBufferPos >= 0) &&
+        (positionForIndex >= file->readBufferPos) &&
+        (positionForIndex <= file->readBufferPos + file->readBuffer.size());
+
+    if(msgLength >= DLT_FILE_READ_AHEAD_SIZE ||
+       (file->readBufferPos >= 0 && !continuesBuffer))
     {
-        /* Message larger than the buffer: read it straight through and leave
-           the buffer alone rather than thrashing it. */
+        /* Message larger than the buffer, or an access somewhere else in the
+           file: read it straight through and leave the buffer alone. */
         buf = file->infile.read(msgLength);
         return buf;
     }
