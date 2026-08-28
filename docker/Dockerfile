@@ -27,7 +27,8 @@ RUN dnf -y --setopt=install_weak_deps=False install \
 ENV QT_HOST_PATH=/usr
 
 WORKDIR /src
-COPY build-in-container.sh /usr/local/bin/build-in-container.sh
-RUN chmod +x /usr/local/bin/build-in-container.sh
+COPY build-in-container.sh collect-mingw-deps.sh toolchain-mingw64-dlt.cmake /usr/local/lib/dlt-build/
+RUN cp /usr/local/lib/dlt-build/build-in-container.sh /usr/local/bin/build-in-container.sh
+RUN chmod +x /usr/local/bin/build-in-container.sh /usr/local/lib/dlt-build/*.sh
 ENTRYPOINT ["/usr/local/bin/build-in-container.sh"]
 CMD ["windows-x64"]

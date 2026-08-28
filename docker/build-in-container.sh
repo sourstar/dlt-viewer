@@ -34,7 +34,7 @@ case "$TARGET" in
 
     cmake -S "$SRC" -B "$BUILD_DIR" -G Ninja \
       "${common_flags[@]}" \
-      -DCMAKE_TOOLCHAIN_FILE=/src/docker/toolchain-mingw64-dlt.cmake \
+      -DCMAKE_TOOLCHAIN_FILE=/usr/local/lib/dlt-build/toolchain-mingw64-dlt.cmake \
       -DCMAKE_SYSTEM_NAME=Windows \
       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
       -DQT_HOST_PATH=/usr \
@@ -51,7 +51,7 @@ case "$TARGET" in
     STAGE="$OUT/DLTViewer-windows-x86_64"
     rm -rf "$STAGE"; mkdir -p "$STAGE"
     cp -a "$INSTALL_DIR/." "$STAGE/"
-    bash "$SRC/docker/collect-mingw-deps.sh" "$STAGE"
+    bash /usr/local/lib/dlt-build/collect-mingw-deps.sh "$STAGE"
 
     # Strip the packaged binaries. The build tree keeps its symbols for
     # debugging; only the copies that ship get stripped. Distribution Qt and
