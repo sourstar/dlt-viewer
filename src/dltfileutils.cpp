@@ -26,6 +26,13 @@ QString DltFileUtils::createTempFile(QDir path,  bool silentmode)
     pid_t a = getpid();
     #endif
 
+    /* Every start that has no file to open creates a scratch file here, and
+       nothing ever removed them again, so the cache directory filled up with
+       one empty file per launch. Drop the leftovers that are still empty --
+       a scratch file with data in it was a real logging session and is left
+       alone. */
+    pruneEmptyTempFiles(path);
+
     QString fn = QDateTime::currentDateTime().toString("yyyy-MM-dd_hh-mm-ss")
                .append("_")
                .append(QString::number(a))
@@ -126,4 +133,25 @@ QDir DltFileUtils::getTempPath(bool silentmode)
     //
     // Fallback, use current directory.
     return QDir (".");
+}
+
+void DltFileUtils::pruneEmptyTempFiles(const QDir &path)
+{
+    if(!path.exists())
+        return;
+
+    const QFileInfoList leftovers =
+        path.entryInfoList(QStringList() << "*_dlt-viewer-tmpfile.dlt", QDir::Files);
+
+    int removed = 0;
+    for(const QFileInfo &info : leftovers)
+    {
+        if(info.size() != 0)
+            continue; // held real data at some point, leave it to the user
+        if(QFile::remove(info.absoluteFilePath()))
+            removed++;
+    }
+
+    if(removed > 0)
+        qDebug() << "Removed" << removed << "empty temporary files from" << path.absolutePath();
 }
