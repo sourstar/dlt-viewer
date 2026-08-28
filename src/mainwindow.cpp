@@ -579,7 +579,8 @@ void MainWindow::initView()
        Ctrl+C or the right-click menu copies just the selection. A click on an
        unselected row still selects the row as before. */
     ui->tableView->setItemDelegate(new TextSelectDelegate(this));
-    ui->tableView->setEditTriggers(QAbstractItemView::SelectedClicked);
+    /* opened explicitly by DltTableView on a horizontal drag, never on a click */
+    ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
     // Keep marked-row traversal cache in sync with model changes.
     connect(tableModel, &QAbstractItemModel::modelReset, this, &MainWindow::invalidateMarkedRowCache);
@@ -799,7 +800,7 @@ void MainWindow::initSearchTable()
 
     m_searchresultsTable->verticalHeader()->setVisible(false);
     m_searchresultsTable->setItemDelegate(new TextSelectDelegate(this));
-    m_searchresultsTable->setEditTriggers(QAbstractItemView::SelectedClicked);
+    m_searchresultsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
 
     /* set table size and en */
