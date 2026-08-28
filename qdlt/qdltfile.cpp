@@ -104,6 +104,7 @@ void QDltFile::setDltIndex(QVector<qint64> &_indexAll, int num)
     }
 
     files[num]->indexAll = _indexAll;
+    files[num]->invalidateReadBuffer();
 }
 
 int QDltFile::size() const
@@ -237,6 +238,7 @@ void QDltFile::clearIndex()
     for(int num=0;num<files.size();num++)
     {
         files[num]->indexAll.clear();
+        files[num]->invalidateReadBuffer();
     }
     
     // Reset size counters when clearing index
@@ -499,6 +501,12 @@ bool QDltFile::updateIndex()
         }
     }
 
+    for(int numFile=0;numFile<files.size();numFile++)
+    {
+        // the file may have grown while it was being scanned
+        files[numFile]->invalidateReadBuffer();
+    }
+
     mutexQDlt.unlock();
 
     /* success */
@@ -662,13 +670,10 @@ QByteArray QDltFile::getMsg(int index) const
     QByteArray buf;
     int num = 0;
 
-
     /* check if index is in range */
     if( index < 0 )
     {
         qDebug() << "getMsg: Index is out of range" << __FILE__ << "line" << __LINE__;
-
-        /* return empty data buffer */
         return QByteArray();
     }
 
@@ -682,61 +687,72 @@ QByteArray QDltFile::getMsg(int index) const
 
     if(num >= files.size())
     {
-     qDebug() << "getMsg: Index is out of range in" << __FILE__ << "line" << __LINE__;
-     /* return empty data buffer */
-     return QByteArray();
+        qDebug() << "getMsg: Index is out of range in" << __FILE__ << "line" << __LINE__;
+        return QByteArray();
     }
 
     /* check if file is already opened */
     if(false == files[num]->infile.isOpen())
     {
-        /* return empty buffer */
         qDebug() << "getMsg: Infile is not open" << files[num]->infile.fileName() << __FILE__ << "line" << __LINE__;
-
-        /* return empty data buffer */
         return QByteArray();
     }
 
-    mutexQDlt.lock();
+    QMutexLocker locker(&mutexQDlt);
 
     QDltFileItem* file = files[num];
-    const QDltFileItem* const_file = file;
-    qint64 positionForIndex = const_file->indexAll[index];
+    const qint64 positionForIndex = file->indexAll[index];
 
-    /* move to file position selected by index */
-    if ( false == file->infile.seek(positionForIndex) )
+    /* length of this message: up to the next one, or up to end of file */
+    qint64 msgLength;
+    if(index == (file->indexAll.size()-1))
+        msgLength = file->infile.size() - positionForIndex;
+    else
+        msgLength = file->indexAll[index+1] - positionForIndex;
+
+    if(msgLength <= 0)
+    {
+        qDebug() << "Negativ index " << msgLength << index << "in" << file->infile.fileName() << __LINE__ << "of" << __FILE__;
+        return QByteArray();
+    }
+
+    /* Serve from the read-ahead buffer when the message is fully inside it.
+       Every full-file pass is sequential, so after one block read the next few
+       thousand messages need no I/O at all. */
+    if(file->readBufferPos >= 0 &&
+       positionForIndex >= file->readBufferPos &&
+       (positionForIndex + msgLength) <= (file->readBufferPos + file->readBuffer.size()))
+    {
+        return file->readBuffer.mid(static_cast<qsizetype>(positionForIndex - file->readBufferPos),
+                                    static_cast<qsizetype>(msgLength));
+    }
+
+    if( false == file->infile.seek(positionForIndex) )
     {
         qDebug() << "Seek error on " << positionForIndex << file->infile.fileName() << __FILE__ << __LINE__;
-        mutexQDlt.unlock();
-        buf.clear();
+        file->invalidateReadBuffer();
+        return QByteArray();
+    }
+
+    if(msgLength >= DLT_FILE_READ_AHEAD_SIZE)
+    {
+        /* Message larger than the buffer: read it straight through and leave
+           the buffer alone rather than thrashing it. */
+        buf = file->infile.read(msgLength);
         return buf;
     }
 
-    /* read DLT message from file */
-    if(index == (file->indexAll.size()-1))
+    file->readBuffer = file->infile.read(DLT_FILE_READ_AHEAD_SIZE);
+    if(file->readBuffer.size() < msgLength)
     {
-        /* last message in file */
-        long int cal_index = file->infile.size() - positionForIndex;
-
-        if ( cal_index < 0 )
-            qDebug() << "Negativ index " << cal_index << index << "in" << file->infile.fileName() << __LINE__ << "of" << __FILE__;
-        else
-         buf = file->infile.read(file->infile.size() - positionForIndex);
-    }
-    else
-    {
-        /* any other file position */
-        long int cal_index = const_file->indexAll[index+1] - positionForIndex;
-        if ( cal_index < 0 )
-            qDebug() << "Negativ index " << cal_index << index << "in" << __LINE__ << "of" << __FILE__;
-        else
-         buf = file->infile.read(cal_index);
+        /* short read: hand back what the file actually has, no buffering */
+        buf = file->readBuffer;
+        file->invalidateReadBuffer();
+        return buf;
     }
 
-    mutexQDlt.unlock();
-
-    /* return DLT message buffer */
-    return buf;
+    file->readBufferPos = positionForIndex;
+    return file->readBuffer.mid(0, static_cast<qsizetype>(msgLength));
 }
 
 bool QDltFile::getMsg(int index,QDltMsg &msg)

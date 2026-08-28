@@ -37,6 +37,9 @@
 #include <QList>
 #include <QSet>
 
+//! Size of the per-file sequential read-ahead buffer.
+#define DLT_FILE_READ_AHEAD_SIZE (4*1024*1024)
+
 class QDLT_EXPORT QDltFileItem
 {
 public:
@@ -48,6 +51,18 @@ public:
       Index contains positions of beginning of DLT messages in DLT log file.
     */
     QVector<qint64> indexAll;
+
+    //! Read-ahead buffer for sequential access.
+    /*!
+      Filter indexing, export, search and marker counting all walk the file
+      message by message. Without this, each message costs one seek plus one
+      read of ~100 bytes; with it a block serves thousands of messages.
+      readBufferPos is the file offset of readBuffer[0], or -1 when empty.
+    */
+    QByteArray readBuffer;
+    qint64 readBufferPos = -1;
+
+    void invalidateReadBuffer() { readBuffer.clear(); readBufferPos = -1; }
 
 };
 

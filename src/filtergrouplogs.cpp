@@ -352,8 +352,7 @@ void filtergrouplogs::onExportFilteredLogsClicked() {
             exportCompleted = true;
             exporter->deleteLater();
         });
-        exporter->setPriority(QThread::LowPriority);
-        exporter->start();
+        exporter->start(QThread::LowPriority);
         while (!exportCompleted && exporter->isRunning()) {
             QCoreApplication::processEvents(QEventLoop::AllEvents, 100);
             if (progress.wasCanceled()) {
