@@ -406,6 +406,13 @@ private:
     void restoreSelection();
     QList<int> previousSelection;
 
+    //! Anchor for keeping the view in place across a filter change.
+    /*! The absolute message index the view was showing, and how far down the
+        viewport it sat, so the same message can be put back at the same
+        height -- or the nearest one still visible, if it was filtered out. */
+    long int anchorMessage = -1;
+    int anchorRowsFromTop = 0;
+
     /* default filters */
     void resetDefaultFilter();
 
