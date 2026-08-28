@@ -34,9 +34,28 @@ QStringList QDltPluginManager::loadPlugins(const QString &settingsPluginPath)
         errorStrings << loadPluginsPath(pluginsDir1);
     }
 
-    /* Check system plugins path */
+    /* Check system plugins path.
+     *
+     * PLUGIN_INSTALLATION_PATH is absolute for a standard Linux installation
+     * but relative elsewhere -- plain "plugins" on Windows. QDir resolves a
+     * relative path against the current working directory, so the viewer would
+     * load whatever plugins happen to live under wherever it was started from,
+     * which on Windows means a stray build tree can hijack it and Qt then
+     * rejects the mismatched plugins. Anchor a relative path to the executable
+     * first, and only fall back to the working-directory interpretation if
+     * that does not exist, so no previously working layout stops working. */
     if(!defaultPluginPath.isEmpty())
     {
+        if(QDir::isRelativePath(defaultPluginPath))
+        {
+            const QString anchored = QDir(QCoreApplication::applicationDirPath())
+                                         .absoluteFilePath(defaultPluginPath);
+            if(QDir(anchored).exists())
+            {
+                defaultPluginPath = anchored;
+            }
+        }
+
         pluginsDir2.setPath(defaultPluginPath);
         if(pluginsDir2.exists() && pluginsDir2.canonicalPath() != pluginsDir1.canonicalPath())
         {

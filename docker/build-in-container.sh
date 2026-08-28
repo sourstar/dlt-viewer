@@ -53,6 +53,15 @@ case "$TARGET" in
     cp -a "$INSTALL_DIR/." "$STAGE/"
     bash "$SRC/docker/collect-mingw-deps.sh" "$STAGE"
 
+    # Strip the packaged binaries. The build tree keeps its symbols for
+    # debugging; only the copies that ship get stripped. Distribution Qt and
+    # mingw DLLs are already stripped, so this mostly affects our own targets.
+    before=$(du -sb "$STAGE" | cut -f1)
+    find "$STAGE" -type f \( -name '*.exe' -o -name '*.dll' \) -print0 \
+        | xargs -0 -r x86_64-w64-mingw32-strip --strip-all 2>/dev/null || true
+    after=$(du -sb "$STAGE" | cut -f1)
+    echo "strip: $((before/1024)) KiB -> $((after/1024)) KiB (saved $(((before-after)/1024)) KiB)"
+
     ( cd "$OUT" && rm -f DLTViewer-windows-x86_64.7z \
         && 7za a -bd -mx=7 "DLTViewer-windows-x86_64.7z" "DLTViewer-windows-x86_64" >/dev/null )
     echo "=== Windows x86_64 artifacts ==="
