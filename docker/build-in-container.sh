@@ -51,7 +51,7 @@ case "$TARGET" in
     STAGE="$OUT/DLTViewer-windows-x86_64"
     rm -rf "$STAGE"; mkdir -p "$STAGE"
     cp -a "$INSTALL_DIR/." "$STAGE/"
-    "$SRC/docker/collect-mingw-deps.sh" "$STAGE"
+    bash "$SRC/docker/collect-mingw-deps.sh" "$STAGE"
 
     ( cd "$OUT" && rm -f DLTViewer-windows-x86_64.7z \
         && 7za a -bd -mx=7 "DLTViewer-windows-x86_64.7z" "DLTViewer-windows-x86_64" >/dev/null )
