@@ -5,7 +5,7 @@
 #include <QDebug>
 #include <QCoreApplication>
 #include <QPluginLoader>
-#include <QMutex>
+#include <QReadWriteLock>
 #include <QTextStream>
 #include <QString>
 
@@ -99,7 +99,7 @@ QStringList QDltPluginManager::loadPluginsPath(QDir &dir)
                     QDltPlugin* item = new QDltPlugin();
                     item->loadPlugin(plugin);
                     item->initMessageDecoder(this);
-                    pluginListMutex.lock();
+                    pluginListMutex.lockForWrite();
                     plugins.append(item);
                     pluginListMutex.unlock();
 
@@ -138,7 +138,7 @@ QStringList QDltPluginManager::loadPluginsPath(QDir &dir)
 }
 
 void QDltPluginManager::loadConfig(QString pluginName, QString filename) {
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QWriteLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin) {
         if (plugin->name() == pluginName)
             plugin->setFilename(filename);
@@ -147,7 +147,7 @@ void QDltPluginManager::loadConfig(QString pluginName, QString filename) {
 
 void QDltPluginManager::decodeMsg(QDltMsg &msg, int triggeredByUser)
 {
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     for(auto* plugin : plugins)
     {
         if(plugin->decodeMsg(msg,triggeredByUser))
@@ -157,7 +157,7 @@ void QDltPluginManager::decodeMsg(QDltMsg &msg, int triggeredByUser)
 
 QDltPlugin* QDltPluginManager::findPlugin(const QString& name) const {
 
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     auto it = std::find_if(plugins.begin(), plugins.end(), [&](auto* plugin) {
         return plugin->name() == name;
     });
@@ -183,7 +183,7 @@ bool QDltPluginManager::decreasePluginPriority(const QString &name)
 
     if(plugins.size() > 1)
     {
-        QMutexLocker mutexLocker(&pluginListMutex);
+        QWriteLocker lock(&pluginListMutex);
         for(int num=0; num < plugins.size()-1; ++num)
         {
             if(plugins[num]->name() == name)
@@ -205,7 +205,7 @@ bool QDltPluginManager::raisePluginPriority(const QString &name)
 
     if(plugins.size() > 1)
     {
-        QMutexLocker mutexLocker(&pluginListMutex);
+        QWriteLocker lock(&pluginListMutex);
         for(int num=1; num < plugins.size(); ++num)
         {
             if (plugins[num]->name() == name) {
@@ -230,7 +230,7 @@ bool QDltPluginManager::setPluginPriority(const QString& name, int prio)
             prio = plugins.size() - 1;
         }
 
-        QMutexLocker mutexLocker(&pluginListMutex);
+        QWriteLocker lock(&pluginListMutex);
         for (int num = 0; num < plugins.size(); ++num) {
             if (plugins[num]->name() == name) {
                 if (prio != num) {
@@ -251,7 +251,7 @@ QStringList QDltPluginManager::getPluginPriorities() const
     QStringList finalPrio;
     finalPrio.reserve(plugins.size());
 
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::transform(plugins.begin(), plugins.end(), std::back_inserter(finalPrio), [](const auto* plugin) {
         return plugin->name();
     });
@@ -263,7 +263,7 @@ QList<QDltPlugin*> QDltPluginManager::getDecoderPlugins() const
 {
     QList<QDltPlugin*> list;
 
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin) {
         if (plugin->isDecoder() && plugin->getMode() >= QDltPlugin::ModeEnable)
             list.append(plugin);
@@ -276,7 +276,7 @@ QList<QDltPlugin*> QDltPluginManager::getViewerPlugins() const
 {
     QList<QDltPlugin*> list;
 
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin) {
         if (plugin->isViewer() && plugin->getMode() >= QDltPlugin::ModeEnable)
             list.append(plugin);
@@ -287,7 +287,7 @@ QList<QDltPlugin*> QDltPluginManager::getViewerPlugins() const
 
 bool QDltPluginManager::stateChanged(int index, QDltConnection::QDltConnectionState connectionState,QString hostname)
 {
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin) {
         if (plugin->isControl())
             plugin->stateChanged(index, connectionState, hostname);
@@ -298,7 +298,7 @@ bool QDltPluginManager::stateChanged(int index, QDltConnection::QDltConnectionSt
 
 bool  QDltPluginManager::autoscrollStateChanged(bool enabled)
 {
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin){
         if(plugin->isControl() )
             plugin->autoscrollStateChanged(enabled);
@@ -309,7 +309,7 @@ bool  QDltPluginManager::autoscrollStateChanged(bool enabled)
 
 bool QDltPluginManager::initControl(QDltControl *control)
 {
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin){
         if(plugin->isControl() )
             plugin->initControl(control);
@@ -320,7 +320,7 @@ bool QDltPluginManager::initControl(QDltControl *control)
 
 bool QDltPluginManager::initConnections(QStringList list)
 {
-    QMutexLocker mutexLocker(&pluginListMutex);
+    QReadLocker lock(&pluginListMutex);
     std::for_each(plugins.begin(), plugins.end(), [&](auto* plugin){
         if(plugin->isControl() )
             plugin->initConnections(list);
@@ -329,3 +329,32 @@ bool QDltPluginManager::initConnections(QStringList list)
     return true;
 }
 
+
+bool QDltPluginManager::decodersAreReentrant() const
+{
+    /* decodeMsg() is called from several worker threads during the parallel
+       filter pass, so every enabled decoder must be safe to run concurrently.
+       The plugin interface has no way to declare that, and a third-party
+       decoder may well keep state between messages, so this is an explicit
+       list of the ones that have been checked: both touch only locals and the
+       message passed to them, reading their own tables without writing.
+
+       Anything else -- including any plugin shipped later -- makes this return
+       false and the caller falls back to decoding serially. */
+    static const QStringList reentrant = {
+        QStringLiteral("Non Verbose Mode Plugin"),
+        QStringLiteral("DLT DBus Plugin"),
+    };
+
+    QReadLocker lock(&pluginListMutex);
+    for(auto *plugin : plugins)
+    {
+        if(plugin->getMode() == QDltPlugin::ModeDisable)
+            continue;
+        if(!plugin->isDecoder())
+            continue;
+        if(!reentrant.contains(plugin->name()))
+            return false;
+    }
+    return true;
+}

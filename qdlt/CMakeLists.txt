@@ -35,7 +35,9 @@ add_library(qdlt SHARED
     qdltfilter.h
     qdltfilter.cpp
     qdltfile.h
+    qdltfilereader.h
     qdltfile.cpp
+    qdltfilereader.cpp
     qdltcontrol.h
     qdltcontrol.cpp
     qdltconnection.h
@@ -98,6 +100,7 @@ target_include_directories(qdlt PUBLIC
 target_link_libraries(qdlt PUBLIC
     ${QT_PREFIX}::Core
     ${QT_PREFIX}::Network
+    ${QT_PREFIX}::Concurrent
     ${QT_PREFIX}::SerialPort)
 
 if(WIN32)

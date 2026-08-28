@@ -54,6 +54,8 @@ add_executable(dlt-viewer
     dltfileindexer.cpp
     dlttableview.h
     dlttableview.cpp
+    textselectdelegate.h
+    textselectdelegate.cpp
     dltuiutils.h
     dltuiutils.cpp
     workingdirectory.h

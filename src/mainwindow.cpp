@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QKeyEvent>
 #include <QClipboard>
+#include <QScrollBar>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 #include <QFileSystemModel>
@@ -80,6 +81,7 @@
 #include "jumptodialog.h"
 #include "fieldnames.h"
 #include "tablemodel.h"
+#include "textselectdelegate.h"
 #include "qdltoptmanager.h"
 #include "qdltctrlmsg.h"
 #include <qdltmsgwrapper.h>
@@ -572,6 +574,15 @@ void MainWindow::initView()
     /* set table size and en */
     ui->tableView->setModel(tableModel);
 
+    /* Let the text inside a cell be selected with the mouse and copied.
+       SelectedClicked means a click on an already selected row opens a
+       read-only editor over that cell; dragging inside it selects text, and
+       Ctrl+C or the right-click menu copies just the selection. A click on an
+       unselected row still selects the row as before. */
+    ui->tableView->setItemDelegate(new TextSelectDelegate(this));
+    /* opened explicitly by DltTableView on a horizontal drag, never on a click */
+    ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
     // Keep marked-row traversal cache in sync with model changes.
     connect(tableModel, &QAbstractItemModel::modelReset, this, &MainWindow::invalidateMarkedRowCache);
     connect(tableModel, &QAbstractItemModel::layoutChanged, this, &MainWindow::invalidateMarkedRowCache);
@@ -789,6 +800,7 @@ void MainWindow::initSearchTable()
     m_searchresultsTable->setAutoScroll(false);
 
     m_searchresultsTable->verticalHeader()->setVisible(false);
+    m_searchresultsTable->setItemDelegate(new TextSelectDelegate(this));
     m_searchresultsTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
 
@@ -1246,6 +1258,11 @@ void MainWindow::closeEvent(QCloseEvent *event)
     {
         QMainWindow::closeEvent(event);
     }
+    /* the index cache is a session accelerator, not something to leave
+       lying next to the users log files */
+    if(dltIndexer)
+        dltIndexer->removeSessionCacheFiles();
+
     if(searchDlg){
             searchDlg->saveSearchHistory(searchHistory);
     }
@@ -2581,6 +2598,8 @@ void MainWindow::reloadLogFileFinishIndex()
         ui->lineEditFilterEnd->setText(QString("%1").arg(qfile.size()-1));
     else
         ui->lineEditFilterEnd->setText(QString("0"));
+
+    updateActionAvailability();
 
     if (settings->autoScroll) {
         ui->tableView->scrollToBottom();
@@ -4135,6 +4154,7 @@ void MainWindow::disconnectECU(EcuItem *ecuitem)
     // If this was the last active ECU, switch back to offline marker union (if enabled).
     if(settings && settings->includeManualMarkersInFilter && !isLiveLoggingActive())
         updateManualMarkerUnionInFilter();
+    updateActionAvailability();
 }
 
 void MainWindow::on_action_menuConfig_Connect_triggered()
@@ -4382,6 +4402,7 @@ void MainWindow::connectECU(EcuItem* ecuitem,bool force)
         }
     }
     checkConnectionState();
+    updateActionAvailability();
 }
 
 void MainWindow::connected()
@@ -8386,6 +8407,7 @@ void MainWindow::syncCheckBoxesAndMenu()
         ui->lineEditFilterStart->setStyleSheet("");
         ui->lineEditFilterEnd->setStyleSheet("");
     }
+    updateActionAvailability();
 }
 
 void MainWindow::on_applyConfig_clicked()
@@ -8406,6 +8428,9 @@ void MainWindow::clearSelection()
 void MainWindow::saveSelection()
 {
     previousSelection.clear();
+    anchorMessage = -1;
+    anchorRowsFromTop = 0;
+
     /* Store old selections */
     QModelIndexList rows = ui->tableView->selectionModel()->selectedRows();
 
@@ -8415,20 +8440,26 @@ void MainWindow::saveSelection()
         previousSelection.append(qfile.getMsgFilterPos(sr));
         //qDebug() << "Save Selection " << i << " at line " << qfile.getMsgFilterPos(sr);
     }
+
+    /* Anchor the viewport: the first selected row if there is one, otherwise
+       whatever happens to be at the top. Remembering how far down the viewport
+       it sits lets the same message be put back at the same height after the
+       filter changes, instead of the view jumping to the top. */
+    int anchorRow = rows.isEmpty() ? ui->tableView->rowAt(0) : rows.first().row();
+    if(anchorRow >= 0 && anchorRow < qfile.sizeFilter())
+    {
+        anchorMessage = qfile.getMsgFilterPos(anchorRow);
+        const int topRow = qMax(0, ui->tableView->rowAt(0));
+        anchorRowsFromTop = qMax(0, anchorRow - topRow);
+    }
 }
 
 void MainWindow::restoreSelection()
 {
-    int firstIndex = 0;
-    //QModelIndex scrollToTarget = tableModel->index(0, 0);
     QItemSelection newSelection;
 
     // clear current selection model
     ui->tableView->selectionModel()->clear();
-
-    // check if anything was selected
-    if(previousSelection.count()==0)
-        return;
 
     // we need to find visible column, otherwise scrollTo does not work, e.g. if Index is disabled
     int col = 0;
@@ -8444,26 +8475,52 @@ void MainWindow::restoreSelection()
     for(int j=0;j<previousSelection.count();j++)
     {
         int nearestIndex = nearest_line(previousSelection.at(j));
-
-        //qDebug() << "Restore Selection" << j << "at index" << nearestIndex << "at line" << previousSelection.at(0);
-
-        if(j==0)
-        {
-            firstIndex = nearestIndex;
-        }
+        if(nearestIndex < 0)
+            continue;
 
         QModelIndex idx = tableModel->index(nearestIndex, col);
-
         newSelection.select(idx, idx);
     }
 
-    // set all selections
-    ui->tableView->selectionModel()->select(newSelection, QItemSelectionModel::Select|QItemSelectionModel::Rows);
+    if(!newSelection.isEmpty())
+    {
+        ui->tableView->selectionModel()->select(newSelection, QItemSelectionModel::Select|QItemSelectionModel::Rows);
+    }
 
-    // scroll to first selected row
-    ui->tableView->setFocus();  // focus must be set before scrollto is possible
-    QModelIndex idx = tableModel->index(firstIndex, col, QModelIndex());
-    ui->tableView->scrollTo(idx, QAbstractItemView::PositionAtTop);
+    /* Put the anchor message back where it was on screen. If the filter change
+       hid it, nearest_line() gives the closest message still shown, so the view
+       stays on the same part of the log either way.
+
+       Deferred to the next turn of the event loop: the model has only just been
+       reset, and until the view has laid out again its scroll range is still
+       stale, so setting a scroll position here would be clamped away. */
+    if(anchorMessage < 0)
+        return;
+
+    const long int wantedMessage = anchorMessage;
+    const int wantedRowsFromTop = anchorRowsFromTop;
+
+    QTimer::singleShot(0, this, [this, wantedMessage, wantedRowsFromTop, col]() {
+        const int row = nearest_line(static_cast<int>(wantedMessage));
+        if(row < 0)
+            return;
+
+        /* Scroll the row that should sit at the top to the top. Expressing the
+           offset in rows rather than pixels keeps this correct whichever
+           vertical scroll mode the view is in -- the log table scrolls per
+           item, so pixel arithmetic on the scroll bar would be out by a row
+           height. */
+        const int topRow = qMax(0, row - wantedRowsFromTop);
+        const QModelIndex topIdx = tableModel->index(topRow, col, QModelIndex());
+        if(!topIdx.isValid())
+            return;
+
+        ui->tableView->scrollTo(topIdx, QAbstractItemView::PositionAtTop);
+
+        qDebug() << "View anchor: message" << wantedMessage << "-> row" << row
+                 << "wanted" << wantedRowsFromTop << "rows from top,"
+                 << "top row now" << ui->tableView->rowAt(0);
+    });
 }
 
 void MainWindow::on_tabWidget_currentChanged(int index)
@@ -8595,6 +8652,13 @@ void MainWindow::on_actionDefault_Filter_Create_Index_triggered()
 
 void MainWindow::applyConfigEnabled(bool enabled)
 {
+    /* Nothing to apply when the project holds no filters at all: enabling the
+       button then just invites a full refilter that cannot change anything. */
+    if(enabled && project.filter->topLevelItemCount() == 0)
+    {
+        enabled = false;
+    }
+
     //qDebug() << "applyConfigEnabled" << enabled << __LINE__;
     if(true == enabled)
     {
@@ -8612,8 +8676,12 @@ void MainWindow::applyConfigEnabled(bool enabled)
         /* hide apply config button */
         //ui->applyConfig->stopPulsing();
         ui->actionApply_Configuration->setCheckable(false);
+        ui->actionApply_Configuration->setChecked(false);
         ui->applyConfig->setEnabled(false);
     }
+    /* the filter toggle is only meaningful when filters exist, and every
+       path that adds or removes one comes through here */
+    syncCheckBoxesAndMenu();
 }
 
 void MainWindow::resetDefaultFilter()
@@ -8776,4 +8844,51 @@ void MainWindow::handleExportResults(const QString &)
 {
     activeExporterThread = nullptr;
     statusProgressBar->hide();
+}
+
+void MainWindow::updateActionAvailability()
+{
+    /* Grey out anything that cannot do its job in the current state, so the
+       toolbar says what is possible instead of failing quietly when pressed. */
+
+    if(isSearchOngoing)
+        return;   // onSearchProgressChanged owns the enabled states while a search runs
+
+    const bool haveMessages = (qfile.size() > 0);
+    const bool haveFilters  = (project.filter->topLevelItemCount() > 0);
+    const bool haveEcus     = (project.ecu->topLevelItemCount() > 0);
+    const bool havePlugins  = !pluginManager.getPlugins().isEmpty();
+
+    bool anyConnected = false;
+    for(int num = 0; num < project.ecu->topLevelItemCount(); num++)
+    {
+        EcuItem *ecuitem = static_cast<EcuItem*>(project.ecu->topLevelItem(num));
+        if(ecuitem && ecuitem->connected)
+        {
+            anyConnected = true;
+            break;
+        }
+    }
+
+    /* nothing to show, save, search or mark without messages */
+    ui->actionClear->setEnabled(haveMessages);
+    ui->actionSaveDltFile->setEnabled(haveMessages);
+    ui->actionMarker->setEnabled(haveMessages);
+    ui->actionFind->setEnabled(haveMessages);
+    ui->actionRegExp->setEnabled(haveMessages);
+    ui->actionSearchList->setEnabled(haveMessages);
+    ui->actionFindNext->setEnabled(haveMessages);
+    ui->actionFindPrevious->setEnabled(haveMessages);
+
+    /* connecting needs somewhere to connect to; disconnecting needs a connection */
+    ui->actionConnectAll->setEnabled(haveEcus);
+    ui->actionDisconnectAll->setEnabled(anyConnected);
+
+    /* keep the toolbar action in step with the Apply button, which already
+       knows whether there is a configuration worth applying */
+    ui->actionApply_Configuration->setEnabled(ui->applyConfig->isEnabled());
+
+    /* a toggle with nothing to toggle only costs a pass over the file */
+    ui->actionToggle_FiltersEnabled->setEnabled(haveFilters);
+    ui->actionToggle_PluginsEnabled->setEnabled(havePlugins);
 }

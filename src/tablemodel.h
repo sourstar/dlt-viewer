@@ -52,6 +52,11 @@ public:
     int rowCount(const QModelIndex &parent = QModelIndex()) const;
     int columnCount(const QModelIndex &parent = QModelIndex()) const;
 
+    //! Cells are reported editable only so a read-only editor can be opened
+    //! over them for text selection. TextSelectDelegate::setModelData() is a
+    //! no-op and setData() is not implemented, so nothing is ever written back.
+    Qt::ItemFlags flags(const QModelIndex &index) const override;
+
     /* pointer to the current loaded file */
     QDltFile *qfile;
     Project *project;

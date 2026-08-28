@@ -17,6 +17,14 @@
 #include "qdltfile.h"
 #include "qdltfilter.h"
 #include "qdltfilterlist.h"
+#if __has_include("qdltfilereader.h")
+#  include "qdltfilereader.h"
+#  define DLTBENCH_HAS_READER 1
+#endif
+
+#include <QtConcurrent>
+#include <QFuture>
+#include <QThread>
 
 static void report(const char *what, qint64 ms, int messages)
 {
@@ -107,6 +115,62 @@ int main(int argc, char **argv)
         }
         report("  filter pass (payload match)", t.elapsed(), messages);
         out << QString("    matched %1 messages").arg(hits) << Qt::endl;
+
+        /* Same walk, but a metadata-only filter (APID). This is what a
+           precomputed metadata table could answer without touching the file. */
+        QDltFilter *mfilter = new QDltFilter();
+        mfilter->type = QDltFilter::positive;
+        mfilter->enableFilter = true;
+        mfilter->enableApid = true;
+        mfilter->apid = "APP1";
+        QDltFilterList mfilters;
+        mfilters.addFilter(mfilter);
+        mfilters.updateSortedFilter();
+
+        t.start();
+        int mhits = 0;
+        for (int i = 0; i < messages; i++) {
+            const QByteArray b = file.getMsg(i);
+            if (b.isEmpty()) continue;
+            if (!msg.setMsg(b, true, false)) continue;
+            if (mfilters.checkFilter(msg)) mhits++;
+        }
+        report("  filter pass (APID match)", t.elapsed(), messages);
+        out << QString("    matched %1 messages").arg(mhits) << Qt::endl;
+
+#ifdef DLTBENCH_HAS_READER
+        /* Same APID filter, but split across workers, each with its own
+           QDltFileReader so they do not contend on one handle or mutex. */
+        const int workers = qMax(1, qMin(QThread::idealThreadCount(), 8));
+        const int chunk = (messages + workers - 1) / workers;
+        QVector<QVector<qint64>> parts(workers);
+        t.start();
+        {
+            QVector<QFuture<void>> futs;
+            for (int w = 0; w < workers; w++) {
+                const int from = w * chunk;
+                const int to = qMin(from + chunk, messages);
+                if (from >= to) continue;
+                futs.append(QtConcurrent::run([&, w, from, to]() {
+                    QDltFileReader reader(file);
+                    QDltMsg m;
+                    for (int i = from; i < to; i++) {
+                        const QByteArray b = reader.getMsg(i);
+                        if (b.isEmpty()) continue;
+                        if (!m.setMsg(b, true, false)) continue;
+                        if (mfilters.checkFilter(m)) parts[w].append(i);
+                    }
+                }));
+            }
+            for (QFuture<void> &f : futs) f.waitForFinished();
+        }
+        const qint64 parMs = t.elapsed();
+        int phits = 0;
+        for (const QVector<qint64> &p : parts) phits += p.size();
+        report(QString("  filter pass (APID, %1 threads)").arg(workers).toLocal8Bit().constData(), parMs, messages);
+        out << QString("    matched %1 messages%2").arg(phits)
+                   .arg(phits == mhits ? "  [same as serial]" : "  *** MISMATCH ***") << Qt::endl;
+#endif
     }
     return 0;
 }

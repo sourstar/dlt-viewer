@@ -208,3 +208,53 @@ void DltFileIndexerThread::processMessage(QSharedPointer<QDltMsg> &msg, int inde
         }
     }
 }
+
+void DltFileIndexerThread::collectSideEffects(const QDltMsg &msg, int index, SideEffects &out)
+{
+    if(msg.getType() != QDltMsg::DltTypeControl ||
+       msg.getSubtype() != QDltMsg::DltControlResponse)
+    {
+        return;
+    }
+
+    const QByteArray payload = msg.getPayload();
+
+    /* ECU software version */
+    if(msg.getCtrlServiceId() == DLT_SERVICE_ID_GET_SOFTWARE_VERSION)
+    {
+        const QByteArray data = payload.mid(9, (payload.size() > 262) ? 256 : (payload.size() - 9));
+        out.versions.append(qMakePair(msg.getEcuid(), QDlt::toAscii(data, true).trimmed()));
+    }
+
+    /* timezone */
+    if(msg.getCtrlServiceId() == DLT_SERVICE_ID_TIMEZONE &&
+       payload.size() == (int)sizeof(DltServiceTimezone))
+    {
+        const DltServiceTimezone *service = (const DltServiceTimezone*) payload.constData();
+        if(msg.getEndianness() == QDlt::DltEndiannessLittleEndian)
+            out.timezones.append(qMakePair((int)service->timezone, service->isdst));
+        else
+            out.timezones.append(qMakePair((int)DLT_SWAP_32(service->timezone), service->isdst));
+    }
+
+    /* unregister context */
+    if(msg.getCtrlServiceId() == DLT_SERVICE_ID_UNREGISTER_CONTEXT &&
+       payload.size() == (int)sizeof(DltServiceUnregisterContext))
+    {
+        const DltServiceUnregisterContext *service = (const DltServiceUnregisterContext*) payload.constData();
+        out.unregisters.append({ msg.getEcuid(),
+                                 QDltMsg::getStringFromId(service->apid),
+                                 QDltMsg::getStringFromId(service->ctid) });
+    }
+
+    /* GetLogInfo responses drive the ECU/context tree */
+    {
+        const char *ptr = payload.constData();
+        int32_t length = payload.size();
+        uint32_t service_id = 0, service_id_tmp = 0;
+        DLT_MSG_READ_VALUE(service_id_tmp, ptr, length, uint32_t);
+        service_id = DLT_ENDIAN_GET_32(((msg.getEndianness() == QDlt::DltEndiannessBigEndian) ? DLT_HTYP_MSBF : 0), service_id_tmp);
+        if(service_id == DLT_SERVICE_ID_GET_LOG_INFO)
+            out.getLogInfo.append(index);
+    }
+}

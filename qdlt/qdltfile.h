@@ -290,6 +290,11 @@ public:
      **/
     int getFileMsgNumber(int num = 0) const;
 
+    //! Const accessors used by QDltFileReader to snapshot an indexed file.
+    QString getFileNameConst(int num) const;
+    qint64 getFileSizeConst(int num) const;
+    QVector<qint64> getIndexAll(int num) const;
+
     //! Get Index of all DLT messages matching filter
     /*!
      * \return List of file positions

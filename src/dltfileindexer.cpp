@@ -10,8 +10,15 @@
 #include <QMutexLocker>
 #include <QDir>
 #include <QFileInfo>
+#include <QSet>
 #include <vector>
 #include <limits>
+#include <atomic>
+#include <QtConcurrent>
+#include <QFuture>
+
+#include "qdltfilereader.h"
+#include "dltfileindexerthread.h"
 
 #include "qdltoptmanager.h"
 
@@ -427,11 +434,40 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
             start=end;
     }
 
+    qDebug() << "Filter index: mode" << (int)mode
+             << "filters" << filterList.filters.size()
+             << "range" << start << "-" << end
+             << "filtersEnabled" << filtersEnabled;
+
+    /* In-memory result of the last filter pass.
+     *
+     * Switching filters off and back on is a normal way to look at the context
+     * around a hit, and it recomputed the whole pass every time unless the
+     * on-disk index cache happened to be enabled. The key is the same one the
+     * disk cache uses, so it already covers the filter set, the files and their
+     * size, the active decoder plugins, the sort mode and the filter range.
+     *
+     * Only used for modeFilter: a fresh load still has to walk the file to
+     * collect the control-message side effects. */
+    if(mode == modeFilter && memoFilterValid && !memoFilterKey.isEmpty())
+    {
+        const QString key = filenameFilterIndexCache(filterList, filenames);
+        if(key == memoFilterKey)
+        {
+            indexFilterList = memoFilterIndex;
+            qDebug() << "Filter index: reused memo," << indexFilterList.size() << "of" << dltFile->size() << "messages";
+            computeMarkerCountsFromIndex(filterList, &indexFilterList);
+            emit(progress(100));
+            return true;
+        }
+    }
+
     // load filter index, if enabled and not an initial loading of file
     if(filterCacheEnabled && mode != modeIndexAndFilter && loadFilterIndexCache(filterList,indexFilterList,filenames))
     {
         // loading filter index from filter is successful
         qDebug() << "Loaded filter index cache for files" << filenames;
+        qDebug() << "Filter index: from disk cache," << indexFilterList.size() << "of" << dltFile->size() << "messages";
         computeMarkerCountsFromIndex(filterList, &indexFilterList);
         return true;
     }
@@ -482,6 +518,167 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     unsigned int progressCounter = 1;
     emit progress(0);
 
+    /* Parallel filter pass.
+     *
+     * Deciding whether a message matches is independent per message, and on the
+     * measured 500 MiB sample the match itself is ~2% of the cost -- the rest is
+     * fetching and parsing. That is embarrassingly parallel, but QDltFile
+     * serialises every fetch on one mutex and one file handle, so each worker
+     * gets its own QDltFileReader instead.
+     *
+     * The serial path is kept for the cases the parallel one cannot serve:
+     *  - viewer/decoder plugins, whose decodeMsg() holds a global lock and whose
+     *    thread safety is not guaranteed,
+     *  - sorted output, which accumulates into a shared QMap,
+     *  - viewer plugins, which must see every message in file order,
+     *  - small files, where the thread setup costs more than it saves.
+     *
+     * The control-message side effects that modeIndexAndFilter collects
+     * (software version, timezone, unregister-context, GetLogInfo) are gathered
+     * per chunk and replayed in file order below, so the initial load can use
+     * this path too.
+     */
+    const bool canRunParallel =
+        (mode == DltFileIndexer::modeFilter || mode == DltFileIndexer::modeIndexAndFilter) &&
+        !sortByTimeEnabled && !sortByTimestampEnabled &&
+        (!getDecoderPluginsActive() || (pluginManager && pluginManager->decodersAreReentrant())) &&
+        activeViewerPlugins.isEmpty() &&
+        ((end - start) >= 200000);
+
+    if(canRunParallel)
+    {
+        const int workers = qMax(1, qMin(QThread::idealThreadCount(), 8));
+        const quint64 span = end - start;
+        const quint64 chunk = (span + workers - 1) / workers;
+
+        qDebug() << "Create filter index: parallel over" << workers << "workers";
+
+        QVector<QVector<qint64>> results(workers);
+        QVector<DltFileIndexerThread::SideEffects> effects(workers);
+        QVector<QFuture<void>> futures;
+        futures.reserve(workers);
+
+        QDltFile *fileForWorkers = dltFile;
+        QDltFilterList *filtersForWorkers = &filterList;
+        const bool dltv2 = dltFile->getDLTv2Support();
+        const bool collectEffects = (mode == DltFileIndexer::modeIndexAndFilter);
+        const bool decodeInWorkers = pluginsEnabled && pluginManager && getDecoderPluginsActive();
+        QDltPluginManager *pluginsForWorkers = pluginManager;
+        std::atomic<int> done{0};
+        std::atomic<quint64> processed{0};   //!< messages examined, for the progress bar
+
+        for(int w = 0; w < workers; w++)
+        {
+            const quint64 from = start + (quint64)w * chunk;
+            const quint64 to = qMin<quint64>(from + chunk, end);
+            if(from >= to)
+                continue;
+
+            futures.append(QtConcurrent::run([=, &results, &effects, &done, &processed]() {
+                QDltFileReader reader(*fileForWorkers);
+                QVector<qint64> &out = results[w];
+                out.reserve(static_cast<qsizetype>((to - from) / 8));
+                QDltMsg msg;
+                for(quint64 i = from; i < to; i++)
+                {
+                    if((i - from) % 4096 == 4095)
+                        processed.fetch_add(4096, std::memory_order_relaxed);
+                    if(stopFlag)
+                        break;
+                    const QByteArray buf = reader.getMsg(static_cast<int>(i));
+                    if(buf.isEmpty())
+                        continue;
+                    if(!msg.setMsg(buf, true, dltv2))
+                        continue;
+                    msg.setIndex(static_cast<int>(i));
+                    if(collectEffects)
+                        DltFileIndexerThread::collectSideEffects(msg, static_cast<int>(i), effects[w]);
+                    if(decodeInWorkers)
+                        pluginsForWorkers->decodeMsg(msg, silentMode);
+                    if(filtersForWorkers->checkFilter(msg))
+                        out.append(static_cast<qint64>(i));
+                }
+                done.fetch_add(1);
+            }));
+        }
+
+        /* Keep the progress bar moving without blocking the workers. Report
+           messages examined rather than workers finished: with 8 chunks that
+           only ever produced 0, 12, 25 ... and in practice looked like a jump
+           straight from 0 to 100. */
+        unsigned int lastPercent = 0;
+        unsigned int nextLogMark = 10;
+        while(true)
+        {
+            bool allDone = true;
+            for(const QFuture<void> &f : futures)
+                if(!f.isFinished()) { allDone = false; break; }
+            if(allDone)
+                break;
+
+            const quint64 seen = processed.load(std::memory_order_relaxed);
+            const unsigned int percent =
+                (span > 0) ? static_cast<unsigned int>(qMin<quint64>(99, (seen * 100) / span)) : 99;
+            if(percent != lastPercent)
+            {
+                lastPercent = percent;
+                emit progress(percent);
+                if(percent >= nextLogMark)
+                {
+                    qDebug() << "CFI:" << percent << "%";
+                    nextLogMark = ((percent / 10) + 1) * 10;
+                }
+            }
+            QThread::msleep(25);
+        }
+        for(QFuture<void> &f : futures)
+            f.waitForFinished();
+
+        if(stopFlag)
+            return false;
+
+        /* concatenate in chunk order: each chunk is already ascending, and the
+           chunks are contiguous, so the result is sorted by construction */
+        qsizetype total = 0;
+        for(const QVector<qint64> &r : results)
+            total += r.size();
+        indexFilterList.reserve(total);
+        for(const QVector<qint64> &r : results)
+            indexFilterList.append(r);
+
+        /* Replay the control-message side effects in file order, on this
+           thread, so the receivers see exactly what the serial path emits. */
+        if(collectEffects)
+        {
+            DltFileIndexerThread::SideEffects merged;
+            for(const DltFileIndexerThread::SideEffects &e : effects)
+                merged.append(e);
+
+            for(const auto &v : merged.versions)
+                emit versionString(v.first, v.second);
+            for(const auto &tz : merged.timezones)
+                emit timezone(tz.first, tz.second);
+            for(const auto &u : merged.unregisters)
+                emit unregisterContext(u[0], u[1], u[2]);
+            for(int idx : merged.getLogInfo)
+                appendToGetLogInfoList(idx);
+
+            qDebug() << "Side effects replayed:" << merged.versions.size() << "version,"
+                     << merged.timezones.size() << "timezone,"
+                     << merged.unregisters.size() << "unregister,"
+                     << merged.getLogInfo.size() << "getloginfo";
+        }
+
+
+        /* marker counts still have to be attributed, cheaply, over the hits */
+        computeMarkerCountsFromIndex(filterList, &indexFilterList);
+
+        emit(progress(100));
+        qDebug() << "CFI:" << 100 << "%";
+        qDebug() << "Create filter index: Finish (parallel)";
+    }
+    else
+    {
     // Start reading messages
     for(ix=start;ix<end;ix++)
     {
@@ -490,14 +687,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         if(!dltFile->getMsg(ix, *msg))
             continue; // Skip broken messages
 
-        /*if(true == useIndexerThread)
-        {
-            indexerThread.enqueueMessage(msg, ix);
-        }
-        else
-        {*/
-            indexerThread.processMessage(msg, ix);
-        //}
+        indexerThread.processMessage(msg, ix);
 
         if((end-start)!=0)
             iPercent = ( (ix-start)*100 )/(end-start);
@@ -532,6 +722,8 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
 
     // update performance counter
     //msecsFilterCounter = time.elapsed();
+    } // end of the serial path
+
 
     // use sorted values if sort by time enabled
     if(sortByTimeEnabled || sortByTimestampEnabled)
@@ -544,6 +736,12 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         qDebug() << "Saved filter index cache for files" << filenames;
     }
 
+    /* remember this result so toggling filters off and on again is free */
+    memoFilterKey = filenameFilterIndexCache(filterList, filenames);
+    memoFilterIndex = indexFilterList;
+    memoFilterValid = true;
+
+    qDebug() << "Filter index: result" << indexFilterList.size() << "of" << dltFile->size() << "messages";
     qDebug() << "Create filter index: Finish";
 
     return true;
@@ -806,6 +1004,7 @@ void DltFileIndexer::run()
             }
            // qDebug() << "setDLTIndex" << num << __FILE__ << __LINE__;
             dltFile->setDltIndex(indexAllList,num);
+            invalidateFilterMemo();  // the message index changed underneath it
             currentRun++;
         }
         emit(finishIndex());
@@ -938,11 +1137,13 @@ bool DltFileIndexer::saveIndexCache(QString filename)
     if (!dir.exists())
         dir.mkpath(".");
     qDebug() << "Saving index cache" << info.dir().path() + "/index/" +filenameCache;
-    if(!saveIndex(info.dir().path() + "/index/" +filenameCache,indexAllList))
+    const QString cachePath = info.dir().path() + "/index/" + filenameCache;
+    if(!saveIndex(cachePath,indexAllList))
     {
         // saving cache file failed
         return false;
     }
+    sessionCacheFiles.append(cachePath);
 
     return true;
 }
@@ -1018,12 +1219,14 @@ bool DltFileIndexer::saveFilterIndexCache(QDltFilterList &filterList, QVector<qi
     QDir dir(info.dir().path()+"/index");
     if (!dir.exists())
         dir.mkpath(".");
-    qDebug() << "Filter Index Cache filename" << info.dir().path() + "/index/" +filename;
-    if(!saveIndex(info.dir().path() + "/index/" +filename,index))
+    const QString filterCachePath = info.dir().path() + "/index/" + filename;
+    qDebug() << "Saving filter index cache" << filterCachePath;
+    if(!saveIndex(filterCachePath,index))
     {
         // saving of cache file failed
         return false;
     }
+    sessionCacheFiles.append(filterCachePath);
 
     return true;
 }
@@ -1255,4 +1458,35 @@ bool DltFileIndexer::loadIndex(QString filename, QVector<qint64> &index)
 qint64 DltFileIndexer::getfileerrors(void)
 {
     return errors_in_file;
+}
+
+void DltFileIndexer::removeSessionCacheFiles()
+{
+    if(sessionCacheFiles.isEmpty())
+        return;
+
+    QSet<QString> dirs;
+    int removed = 0;
+    for(const QString &path : sessionCacheFiles)
+    {
+        QFileInfo info(path);
+        dirs.insert(info.absolutePath());
+        if(QFile::remove(path))
+            removed++;
+    }
+    sessionCacheFiles.clear();
+
+    /* take the index directory with it when nothing else is left in it, so the
+       viewer does not leave an empty folder next to the user's logs */
+    for(const QString &dirPath : dirs)
+    {
+        QDir dir(dirPath);
+        if(dir.exists() && dir.dirName() == QStringLiteral("index") &&
+           dir.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
+        {
+            dir.rmdir(dir.absolutePath());
+        }
+    }
+
+    qDebug() << "Removed" << removed << "index cache files written this session";
 }

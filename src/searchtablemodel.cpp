@@ -377,3 +377,11 @@ QColor SearchTableModel::getMsgBackgroundColor(QDltMsg &msg) const
 
     return brushColor;
 }
+
+Qt::ItemFlags SearchTableModel::flags(const QModelIndex &index) const
+{
+    Qt::ItemFlags f = QAbstractTableModel::flags(index);
+    if(index.isValid())
+        f |= Qt::ItemIsEditable;
+    return f;
+}

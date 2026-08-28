@@ -25,6 +25,11 @@
 #define DLT_TYPE_INFO_STRG 0x00000200u
 #define DLT_SCOD_ASCII     0x00000000u
 
+#define DLT_TYPE_CONTROL   0x03
+#define DLT_CONTROL_RESPONSE 0x02
+#define DLT_SERVICE_ID_GET_LOG_INFO         0x03u
+#define DLT_SERVICE_ID_GET_SOFTWARE_VERSION 0x13u
+
 static void put_u16_be(unsigned char *p, uint16_t v) { p[0] = (unsigned char)(v >> 8); p[1] = (unsigned char)v; }
 static void put_u32_be(unsigned char *p, uint32_t v) { p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16); p[2] = (unsigned char)(v >> 8); p[3] = (unsigned char)v; }
 static void put_u16_le(unsigned char *p, uint16_t v) { p[0] = (unsigned char)v; p[1] = (unsigned char)(v >> 8); }
@@ -75,6 +80,43 @@ int main(int argc, char **argv)
         const char *apid = APIDS[n % NAPID];
         const char *ctid = CTIDS[(n / NAPID) % NCTID];
         int level = LEVELS[n % NLEVEL];
+
+        /* Sprinkle in control responses: a software-version report and a
+           GetLogInfo response. These drive the version display and the
+           ECU/context tree, and exercise the indexer's side-effect path. */
+        if (n % 50000 == 1 || n % 50000 == 2) {
+            const int isVersion = (n % 50000 == 1);
+            unsigned char *cp = msg;
+            const char *vstr = "ECU1 build 2.30.1 synthetic";
+            int vlen = (int)strlen(vstr);
+            int cpayload = isVersion ? (4 + 1 + 4 + vlen) : (4 + 1 + 4);
+            int clen = 4 + 4 + 4 + 10 + cpayload;
+
+            memcpy(cp, "DLT", 4);                        cp += 4;
+            put_u32_le(cp, seconds);                         cp += 4;
+            put_u32_le(cp, (uint32_t)((n * 977) % 1000000)); cp += 4;
+            set_id((char *)cp, "ECU1");                      cp += 4;
+            *cp++ = DLT_HTYP_VERS1 | DLT_HTYP_UEH | DLT_HTYP_WEID | DLT_HTYP_WTMS;
+            *cp++ = mcnt++;
+            put_u16_be(cp, (uint16_t)clen);                  cp += 2;
+            set_id((char *)cp, "ECU1");                      cp += 4;
+            put_u32_be(cp, tmsp);                            cp += 4;
+            *cp++ = (unsigned char)((DLT_TYPE_CONTROL << 1) | (DLT_CONTROL_RESPONSE << 4));
+            *cp++ = 1;
+            set_id((char *)cp, "DA1");                       cp += 4;
+            set_id((char *)cp, "DC1");                       cp += 4;
+            put_u32_le(cp, isVersion ? DLT_SERVICE_ID_GET_SOFTWARE_VERSION
+                                     : DLT_SERVICE_ID_GET_LOG_INFO);  cp += 4;
+            *cp++ = 0; /* status ok */
+            put_u32_le(cp, isVersion ? (uint32_t)vlen : 0u);  cp += 4;
+            if (isVersion) { memcpy(cp, vstr, vlen); cp += vlen; }
+
+            size_t ctotal = (size_t)(cp - msg);
+            if (fwrite(msg, 1, ctotal, f) != ctotal) { perror("fwrite"); fclose(f); return 1; }
+            written += (long long)ctotal;
+            n++;
+            continue;
+        }
 
         /* every 101st message carries a distinctive token to search/filter for */
         int len;
