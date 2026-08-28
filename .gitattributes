@@ -1,7 +1,8 @@
 * text=auto
 
-# The container build scripts are executed by bash inside a Linux image, so
-# they must keep LF endings even when checked out on Windows.
-docker/*.sh text eol=lf
+# Shell scripts are executed by bash -- on Linux CI, in the Docker build
+# container, and by CMake during the build. A CRLF checkout on Windows makes
+# the kernel look for an interpreter called "bash\r", so pin them to LF.
+*.sh text eol=lf
 docker/Dockerfile text eol=lf
 docker/*.cmake text eol=lf
