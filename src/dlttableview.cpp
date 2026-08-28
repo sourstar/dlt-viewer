@@ -106,20 +106,29 @@ void DltTableView::mouseMoveEvent(QMouseEvent *event)
             const QModelIndex index = pressIndex;
             if(edit(index, QAbstractItemView::AllEditTriggers, event))
             {
-                /* Ask the delegate which editor it just made. childAt() cannot
-                   be used here: the widget may not be shown yet, and it skips
-                   hidden children. */
+                /* Ask the delegate which editor it just made. childAt() cannot be
+                   used here: the widget may not be shown yet, and it skips hidden
+                   children. */
                 if(TextSelectDelegate *d = qobject_cast<TextSelectDelegate*>(itemDelegateForIndex(index)))
                     textDragEditor = d->lastEditor();
                 else
                     textDragEditor = viewport()->childAt(pressPos);
 
-                if(textDragEditor && !textDragEditor->isVisible())
-                    textDragEditor->show();
                 if(textDragEditor)
                 {
-                    /* replay the original press so the editor starts a selection
-                       there, then hand it the movement so far */
+                    if(!textDragEditor->isVisible())
+                        textDragEditor->show();
+
+                    /* Drop the row highlight for the duration. With the whole row
+                       still painted in the selection colour there is no way to see
+                       what is being selected; the editor draws on a plain
+                       background so only the selected run is highlighted. Normal
+                       row colours come back when the editor closes. */
+                    if(selectionModel())
+                        selectionModel()->clearSelection();
+
+                    /* replay the original press so the editor starts its selection
+                       where the button went down, then hand it the movement so far */
                     QMouseEvent press(QEvent::MouseButtonPress,
                                       textDragEditor->mapFrom(viewport(), pressPos),
                                       event->scenePosition(), event->globalPosition(),

@@ -18,7 +18,9 @@ QWidget *TextSelectDelegate::createEditor(QWidget *parent, const QStyleOptionVie
     editor->setReadOnly(true);
     editor->setFrame(false);
     /* keep the cell looking like a cell rather than an input field */
-    editor->setStyleSheet("QLineEdit { background: palette(highlight); color: palette(highlighted-text); }");
+    /* Plain background while selecting, so the blue is the selection itself and
+       not the row highlight. The row keeps its normal colours underneath. */
+    editor->setStyleSheet("QLineEdit { background: palette(base); color: palette(text); }");
     editor->setContextMenuPolicy(Qt::DefaultContextMenu); // gives Copy / Select All
     return editor;
 }

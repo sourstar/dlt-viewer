@@ -434,6 +434,11 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
             start=end;
     }
 
+    qDebug() << "Filter index: mode" << (int)mode
+             << "filters" << filterList.filters.size()
+             << "range" << start << "-" << end
+             << "filtersEnabled" << filtersEnabled;
+
     /* In-memory result of the last filter pass.
      *
      * Switching filters off and back on is a normal way to look at the context
@@ -450,7 +455,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
         if(key == memoFilterKey)
         {
             indexFilterList = memoFilterIndex;
-            qDebug() << "Reused the previous filter index:" << indexFilterList.size() << "messages";
+            qDebug() << "Filter index: reused memo," << indexFilterList.size() << "of" << dltFile->size() << "messages";
             computeMarkerCountsFromIndex(filterList, &indexFilterList);
             emit(progress(100));
             return true;
@@ -462,6 +467,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     {
         // loading filter index from filter is successful
         qDebug() << "Loaded filter index cache for files" << filenames;
+        qDebug() << "Filter index: from disk cache," << indexFilterList.size() << "of" << dltFile->size() << "messages";
         computeMarkerCountsFromIndex(filterList, &indexFilterList);
         return true;
     }
@@ -735,6 +741,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     memoFilterIndex = indexFilterList;
     memoFilterValid = true;
 
+    qDebug() << "Filter index: result" << indexFilterList.size() << "of" << dltFile->size() << "messages";
     qDebug() << "Create filter index: Finish";
 
     return true;
