@@ -7324,21 +7324,14 @@ void MainWindow::filterDialogRead(FilterDialog &dlg,FilterItem* item)
     if(item->filter.isMarker())
     {
         tableModel->modelChanged();
-        QVector<qint64> indices;
         if(qfile.isFilter())
         {
-            indices = qfile.getIndexFilter();
+            dltIndexer->recomputeMarkerCounts(qfile.getFilterList(), qfile.getIndexFilterRef());
         }
         else
         {
-            indices.reserve(qfile.size());
-            for(int i = 0; i < qfile.size(); i++)
-            {
-                indices.append(i);
-            }
+            dltIndexer->recomputeMarkerCountsForAllMessages(qfile.getFilterList());
         }
-
-        dltIndexer->recomputeMarkerCounts(qfile.getFilterList(), indices);
     }
 }
 
@@ -7352,23 +7345,12 @@ void MainWindow::findFilteredLines()
     // Keep qfile filters synchronized with what is currently loaded in the UI tree.
     filterUpdate();
 
-    QVector<qint64> indices;
-    if(qfile.isFilter())
-    {
-        indices = qfile.getIndexFilter();
-    }
-    else
-    {
-        indices.reserve(qfile.size());
-        for(int i = 0; i < qfile.size(); i++)
-        {
-            indices.append(i);
-        }
-    }
+    const bool markerCountOverFilteredView = qfile.isFilter();
+    const int markerCountTotal = markerCountOverFilteredView ? qfile.getIndexFilterRef().size() : qfile.size();
 
     if(dltIndexer != nullptr)
     {
-        QProgressDialog progress("Calculating marked message counts...", QString(), 0, indices.size(), this);
+        QProgressDialog progress("Calculating marked message counts...", QString(), 0, markerCountTotal, this);
         progress.setWindowModality(Qt::WindowModal);
         progress.setMinimumDuration(0);
         progress.setCancelButton(nullptr); // simple non-cancelable progress
@@ -7385,7 +7367,10 @@ void MainWindow::findFilteredLines()
             });
 
         progress.show();
-        dltIndexer->recomputeMarkerCounts(qfile.getFilterList(), indices);
+        if(markerCountOverFilteredView)
+            dltIndexer->recomputeMarkerCounts(qfile.getFilterList(), qfile.getIndexFilterRef());
+        else
+            dltIndexer->recomputeMarkerCountsForAllMessages(qfile.getFilterList());
         progress.setValue(progress.maximum());
 
         disconnect(c1);

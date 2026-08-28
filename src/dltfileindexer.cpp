@@ -430,7 +430,7 @@ bool DltFileIndexer::indexFilter(QStringList filenames)
     {
         // loading filter index from filter is successful
         qDebug() << "Loaded filter index cache for files" << filenames;
-        computeMarkerCountsFromIndex(filterList, indexFilterList);
+        computeMarkerCountsFromIndex(filterList, &indexFilterList);
         return true;
     }
 
@@ -570,9 +570,22 @@ void DltFileIndexer::recomputeMarkerCounts(const QDltFilterList &filterList, con
     emit markerCountProgressValue(0);
 
     resetMarkerCounts(filterList);
-    computeMarkerCountsFromIndex(filterList, indices);
+    computeMarkerCountsFromIndex(filterList, &indices);
 
     emit markerCountProgressValue(indices.size());
+}
+
+void DltFileIndexer::recomputeMarkerCountsForAllMessages(const QDltFilterList &filterList)
+{
+    const int total = dltFile ? dltFile->size() : 0;
+
+    emit markerCountProgressMax(total);
+    emit markerCountProgressValue(0);
+
+    resetMarkerCounts(filterList);
+    computeMarkerCountsFromIndex(filterList, nullptr);
+
+    emit markerCountProgressValue(total);
 }
 
 void DltFileIndexer::resetMarkerCounts(const QDltFilterList &filterList)
@@ -590,14 +603,16 @@ void DltFileIndexer::resetMarkerCounts(const QDltFilterList &filterList)
     }
 }
 
-void DltFileIndexer::computeMarkerCountsFromIndex(const QDltFilterList &filterList, const QVector<qint64> &indices)
+void DltFileIndexer::computeMarkerCountsFromIndex(const QDltFilterList &filterList, const QVector<qint64> *indices)
 {
-    const int total = indices.size();
+    // indices == nullptr means "every message in the file", expressed without
+    // building an identity vector of one qint64 per message first.
+    const int total = indices ? indices->size() : (dltFile ? dltFile->size() : 0);
     const int step = qMax(1, total / 200); // throttle UI updates
 
     for(int i = 0; i < total; ++i)
     {
-        const qint64 rawIndex = indices[i];
+        const qint64 rawIndex = indices ? (*indices)[i] : static_cast<qint64>(i);
         if(rawIndex < 0 || rawIndex > std::numeric_limits<int>::max())
         {
             continue;
@@ -617,6 +632,13 @@ void DltFileIndexer::computeMarkerCountsFromIndex(const QDltFilterList &filterLi
 
         if ((i % step) == 0 || i + 1 == total)
             emit markerCountProgressValue(i + 1);
+
+        /* stop if requested */
+        if(true == stopFlag)
+        {
+            qDebug().noquote() << "Request stopping marker count received" << __LINE__ << __FILE__;
+            return;
+        }
     }
 }
 

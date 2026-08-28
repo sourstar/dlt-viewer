@@ -58,7 +58,14 @@ void DltFileIndexerThread::processMessage(QSharedPointer<QDltMsg> &msg, int inde
     bool bool_result = false;
     QDltFilterList::PreDecodeDecision preDecodeDecision = QDltFilterList::PreDecodeDecision::NeedsDecode;
 
-    if(mode == DltFileIndexer::modeIndexAndFilter)
+    // modeFilter rebuilds the filter index for a file that is already indexed;
+    // that is the path taken when a filter is applied from the UI, and the one
+    // users wait on most. Everything else in this function is gated on
+    // modeIndexAndFilter, so when only the filter index is being rebuilt the
+    // decoded message has exactly one consumer: the filter check itself.
+    const bool filterIndexOnly = (mode == DltFileIndexer::modeFilter);
+
+    if(mode == DltFileIndexer::modeIndexAndFilter || filterIndexOnly)
     {
         preDecodeDecision = filterList->checkFilterBeforeDecode(*msg);
     }
@@ -125,7 +132,7 @@ void DltFileIndexerThread::processMessage(QSharedPointer<QDltMsg> &msg, int inde
     /* Process all decoderplugins */
     const bool skipDecodeForRejectedMessage =
         pluginsEnabled &&
-        activeViewerPlugins->isEmpty() &&
+        (filterIndexOnly || activeViewerPlugins->isEmpty()) &&
         (preDecodeDecision == QDltFilterList::PreDecodeDecision::Reject);
 
     if(pluginsEnabled && !skipDecodeForRejectedMessage)

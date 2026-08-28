@@ -138,6 +138,10 @@ public:
     void addMarkerCount(const QString &filterName);
     void recomputeMarkerCounts(const QDltFilterList &filterList, const QVector<qint64> &indices);
 
+    //! Recount marker matches over every message in the file.
+    /*! Avoids materialising an identity index vector just to express "all". */
+    void recomputeMarkerCountsForAllMessages(const QDltFilterList &filterList);
+
     // let worker thread append to getLogInfoList
     void appendToGetLogInfoList(int value);
 
@@ -223,7 +227,8 @@ private:
     QMap<QString, int> markerCounts;
 
     void resetMarkerCounts(const QDltFilterList &filterList);
-    void computeMarkerCountsFromIndex(const QDltFilterList &filterList, const QVector<qint64> &indices);
+    // indices == nullptr means "every message in the file".
+    void computeMarkerCountsFromIndex(const QDltFilterList &filterList, const QVector<qint64> *indices);
 
 signals:
 
