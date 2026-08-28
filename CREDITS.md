@@ -75,7 +75,10 @@ Authored here, building on the above:
   out.
 * **Cheaper marker counting.** Recounting no longer materialises an identity
   index vector (~80 MB on a 10M-message file) just to mean "all messages".
-* **Container build and cross-compilation fixes.** See `docker/README.md`.
+* **Cross-compilation fixes** that let a Windows build be produced from a
+  non-Windows host. The mingw toolchain and its container live on the
+  `perf/mingw` branch; this branch stays MSVC + Qt 6.8.3 so it can be
+  backported to upstream cleanly.
 
 ## Deliberately not merged
 

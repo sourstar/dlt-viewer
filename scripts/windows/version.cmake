@@ -1,5 +1,5 @@
 # Run for a Windows *target*, not just a Windows host, so that the Linux
-# container in docker/ can cross-compile the Windows build.
+# mingw container on the perf/mingw branch can cross-compile the Windows build.
 #
 # CMake processes the top-level CMakeLists twice on a fresh configure; on the
 # second pass WIN32 and CMAKE_SYSTEM_NAME are not yet populated, so the
@@ -73,7 +73,7 @@ execute_process(
 )
 
 # The parse_version.bat helper above only runs on a Windows host. When this
-# Windows build is produced by cross-compiling from Linux (see docker/), fall
+# Windows build is produced by cross-compiling from Linux, fall
 # back to reading src/version.h directly with CMake.
 if(NOT CMAKE_HOST_WIN32)
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/src/version.h" DLT_VERSION_HEADER_CONTENT)

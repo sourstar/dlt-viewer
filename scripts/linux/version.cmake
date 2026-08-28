@@ -1,5 +1,5 @@
 # Skip when the *target* is Windows (native Windows build or the cross build
-# from docker/); scripts/windows/version.cmake owns that case and latches
+# from the perf/mingw branch); scripts/windows/version.cmake owns that case and latches
 # DLT_TARGET_IS_WINDOWS into the cache for CMake's second configure pass.
 if(WIN32 OR "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows" OR "$ENV{DLT_TARGET_IS_WINDOWS}")
     return()
