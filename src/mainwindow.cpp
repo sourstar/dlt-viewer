@@ -8381,6 +8381,10 @@ void MainWindow::syncCheckBoxesAndMenu()
     ui->actionToggle_FiltersEnabled->setChecked(filtersEnabled);
     ui->actionToggle_FiltersEnabled->setText(filtersEnabled ? "Disable Filters" : "Enable Filters");
 
+    /* Nothing to switch on or off when the project holds no filters. */
+    const bool haveFilters = (project.filter->topLevelItemCount() > 0);
+    ui->actionToggle_FiltersEnabled->setEnabled(haveFilters);
+
     const bool sortByTimeEnabled = QDltSettingsManager::getInstance()->value("startup/sortByTimeEnabled", false).toBool();
     const bool sortByTimestampEnabled = QDltSettingsManager::getInstance()->value("startup/sortByTimestampEnabled", false).toBool();
     ui->actionToggle_SortByTimeEnabled->setEnabled(filtersEnabled);
@@ -8638,6 +8642,9 @@ void MainWindow::applyConfigEnabled(bool enabled)
         ui->actionApply_Configuration->setChecked(false);
         ui->applyConfig->setEnabled(false);
     }
+    /* the filter toggle is only meaningful when filters exist, and every
+       path that adds or removes one comes through here */
+    syncCheckBoxesAndMenu();
 }
 
 void MainWindow::resetDefaultFilter()
